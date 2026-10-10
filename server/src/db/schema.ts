@@ -159,6 +159,8 @@ export const schedules = sqliteTable(
     categoryId: text('category_id').references(() => categories.id, { onDelete: 'set null' }),
     payeeId: text('payee_id').references(() => payees.id, { onDelete: 'set null' }),
     notes: text('notes'),
+    /** Recognizes this item's transactions by the bank's text (case-insensitive "contains") */
+    matchText: text('match_text'),
     status: text('status').notNull().default('active'),
     autoCreate: integer('auto_create').notNull().default(0),
     autoCreateFrom: text('auto_create_from'),
