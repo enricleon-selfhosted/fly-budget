@@ -273,6 +273,9 @@ transactionsRouter.post('/transfer', (req, res) => {
   const fromAcct = db.select().from(accounts).where(eq(accounts.id, fromAccountId)).get();
   const toAcct = db.select().from(accounts).where(eq(accounts.id, toAccountId)).get();
   if (!fromAcct || !toAcct) return res.status(404).json({ error: 'Account not found' });
+  // Both sides move the same amount: only meaningful within one currency
+  if (fromAcct.currency !== toAcct.currency)
+    return res.status(400).json({ error: 'Transfers need two accounts in the same currency' });
 
   const fromId = txId ?? nanoid();
   const toId = nanoid();

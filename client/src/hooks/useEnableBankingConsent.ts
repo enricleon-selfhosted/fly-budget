@@ -6,6 +6,17 @@ import type { EnableBankingConsentResult } from '../types';
 
 const POLL_INTERVAL_MS = 3_000;
 
+/** Shows the bank's page in the tab opened for it, or a new one (the desktop app's system browser) */
+function openBankPage(url: string, tab: Window | null) {
+  if (tab && !tab.closed) {
+    // The bank's page must not be able to reach back into FlyBudget's
+    tab.opener = null;
+    tab.location.replace(url);
+  } else {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+}
+
 export type ConsentState =
   | { phase: 'idle' }
   | { phase: 'starting' }
@@ -22,6 +33,8 @@ export function useEnableBankingConsent(onComplete: (result: EnableBankingConsen
   const qc = useQueryClient();
   const [state, setState] = useState<ConsentState>({ phase: 'idle' });
   const consent = useRef<string | null>(null);
+  /** Bumped by every start, finish and cancel, so a start that returns late knows it's stale */
+  const generation = useRef(0);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
@@ -34,6 +47,7 @@ export function useEnableBankingConsent(onComplete: (result: EnableBankingConsen
   const finish = useCallback(
     (next: ConsentState) => {
       stopPolling();
+      generation.current++;
       consent.current = null;
       setState(next);
     },
@@ -80,15 +94,28 @@ export function useEnableBankingConsent(onComplete: (result: EnableBankingConsen
   const start = useCallback(
     async (input: StartConsentInput) => {
       stopPolling();
+      const attempt = ++generation.current;
+      // Opened now, while the click still counts: browsers block windows opened after an await.
+      // The desktop app refuses blank windows (it sends https links to the system browser), so
+      // there this is null and the bank page is opened once its address is known.
+      const tab = window.open('', '_blank');
       setState({ phase: 'starting' });
       try {
         const { id, url } = await api.startEnableBankingConsent(input);
+        if (attempt !== generation.current) {
+          // Closed or restarted meanwhile: drop this consent
+          tab?.close();
+          api.cancelEnableBankingConsent(id).catch(() => {});
+          return;
+        }
         consent.current = id;
-        window.open(url, '_blank', 'noopener,noreferrer');
+        openBankPage(url, tab);
         setState({ phase: 'waiting', url, submitting: false });
         timer.current = setTimeout(() => poll(id), POLL_INTERVAL_MS);
       } catch (err) {
-        setState({ phase: 'error', message: (err as Error).message });
+        tab?.close();
+        if (attempt === generation.current)
+          setState({ phase: 'error', message: (err as Error).message });
       }
     },
     [poll, stopPolling],
@@ -116,7 +143,7 @@ export function useEnableBankingConsent(onComplete: (result: EnableBankingConsen
   );
 
   const reopen = useCallback(() => {
-    if (state.phase === 'waiting') window.open(state.url, '_blank', 'noopener,noreferrer');
+    if (state.phase === 'waiting') openBankPage(state.url, null);
   }, [state]);
 
   const cancel = useCallback(() => {
@@ -129,6 +156,7 @@ export function useEnableBankingConsent(onComplete: (result: EnableBankingConsen
   useEffect(
     () => () => {
       stopPolling();
+      generation.current++;
       if (consent.current) api.cancelEnableBankingConsent(consent.current).catch(() => {});
       consent.current = null;
     },

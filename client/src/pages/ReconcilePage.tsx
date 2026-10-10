@@ -119,6 +119,7 @@ export default function ReconcilePage() {
               <CurrencyInput
                 value={statementBalance}
                 onChange={setStatementBalance}
+                currency={account.currency}
                 className="w-full text-lg"
               />
             </div>
@@ -126,7 +127,7 @@ export default function ReconcilePage() {
             <div className="rounded-lg border border-border-light bg-surface-alt px-4 py-3">
               <p className="text-xs text-text-tertiary">Current selected balance in app</p>
               <p className="text-lg font-semibold text-text mt-0.5 tabular-nums">
-                {formatCurrency(selectedBalance)}
+                {formatCurrency(selectedBalance, account.currency)}
               </p>
             </div>
 
@@ -211,7 +212,7 @@ export default function ReconcilePage() {
                       <td
                         className={`px-4 py-2 text-sm text-right tabular-nums font-medium ${tx.amount < 0 ? 'text-text' : 'text-positive'}`}
                       >
-                        {formatCurrency(tx.amount)}
+                        {formatCurrency(tx.amount, account.currency)}
                       </td>
                       <td className="px-4 py-2 text-center">
                         <div
@@ -235,13 +236,13 @@ export default function ReconcilePage() {
             <div>
               <p className="text-xs text-text-tertiary mb-0.5">Selected Balance</p>
               <p className="text-xl font-semibold text-text tabular-nums">
-                {formatCurrency(selectedBalance)}
+                {formatCurrency(selectedBalance, account.currency)}
               </p>
             </div>
             <div>
               <p className="text-xs text-text-tertiary mb-0.5">Statement Balance</p>
               <p className="text-xl font-semibold text-text tabular-nums">
-                {formatCurrency(statementBalance)}
+                {formatCurrency(statementBalance, account.currency)}
               </p>
             </div>
             <div className="pt-3 border-t border-border-light">
@@ -249,7 +250,7 @@ export default function ReconcilePage() {
               <p
                 className={`text-2xl font-semibold tabular-nums ${isBalanced ? 'text-positive' : 'text-negative'}`}
               >
-                {formatCurrency(difference)}
+                {formatCurrency(difference, account.currency)}
               </p>
               {isBalanced && <p className="text-xs text-positive mt-1">Ready to finish!</p>}
             </div>

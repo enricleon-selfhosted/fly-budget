@@ -12,7 +12,7 @@ import { PlaidSetupModal } from '../components/plaid/PlaidSetupModal';
 import { SimplefinConnectModal } from '../components/simplefin/SimplefinConnectModal';
 import { HelpFooter } from '../components/layout/HelpFooter';
 import { ExternalLink } from '../components/ui/ExternalLink';
-import { PlaidLogo, SimplefinLogo } from '../components/ui/BankLogos';
+import { EnableBankingLogo, PlaidLogo, SimplefinLogo } from '../components/ui/BankLogos';
 import { BrandName } from '../components/ui/BrandName';
 import { docsUrl } from '../utils/project';
 
@@ -98,7 +98,7 @@ export default function WelcomePage() {
             the accounts you want to track.
           </p>
 
-          <div className="grid gap-4 mt-8 grid-cols-1 sm:grid-cols-3">
+          <div className="grid gap-4 mt-8 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
             <SetupOption
               icon={<PlaidLogo size={24} className="text-text" />}
               title="Connect with Plaid"
@@ -116,6 +116,19 @@ export default function WelcomePage() {
               description="Set it up once and new transactions arrive on their own, through SimpleFIN Bridge (thousands of banks). Paid directly to SimpleFIN."
               action="Connect SimpleFIN"
               onClick={() => setShowSimplefin(true)}
+            />
+            <SetupOption
+              icon={<EnableBankingLogo size={24} className="text-text" />}
+              title="European bank (Enable Banking)"
+              tag="Free for personal use"
+              time="~15 min"
+              description="For banks in Europe (PSD2). Register a free Enable Banking application, then approve access at your bank. Only the accounts you link in Enable Banking can be read."
+              action="Connect a European bank"
+              onClick={() => {
+                // Settings sends a budget with no accounts back here unless setup was skipped
+                setSetupSkipped(true);
+                navigate('/settings?tab=connections&provider=enablebanking');
+              }}
             />
             <SetupOption
               icon={<PencilLine size={20} className="text-text-secondary" />}

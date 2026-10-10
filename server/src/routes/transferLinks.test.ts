@@ -156,3 +156,22 @@ describe('POST /transactions/:id/unlink-transfer', () => {
     expect(row(a).transferTransactionId).toBe(b);
   });
 });
+
+describe('POST /transactions/transfer', () => {
+  it('refuses a transfer between accounts in different currencies', async () => {
+    const { body: eur } = await send('POST', '/accounts', { name: 'EUR', type: 'checking' });
+    const { body: usd } = await send('POST', '/accounts', {
+      name: 'USD',
+      type: 'checking',
+      currency: 'USD',
+    });
+    const res = await send('POST', '/transactions/transfer', {
+      fromAccountId: eur.id,
+      toAccountId: usd.id,
+      date: '2096-03-12',
+      amount: 1_000,
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/same currency/);
+  });
+});
