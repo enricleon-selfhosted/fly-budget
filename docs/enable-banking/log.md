@@ -10,3 +10,16 @@
   related accounts; YNAB as the reference for behavior; multi-currency awareness.
 - Branch `feat/enable-banking` created from `main` (`b0dcef9`); baseline: server 263 tests and
   client tests green.
+- Phase 0 (money, account currency, transfer link helpers, migration `0021`), Phase 1 (bank-sync
+  core with contract suite) and Phase 2–3 (adapter, services, routes, callback before the guards,
+  startup sync, encryption, backup re-link, demo stubs, reports leave out foreign currencies) done
+  by the lead, with tests through public interfaces: 357 → 390+ server tests.
+- Client data layer (types, API, hooks, consent polling with paste fallback, `currencyCode`,
+  `formatCurrency(cents, currency)`) by the lead.
+- Delegated to low-cost agents (Haiku, extra-high effort), on disjoint files, reviewed by the
+  lead before committing: per-account currency in the UI + "Unlink transfer" (done; the lead added
+  `currency` to the accounts API types and to account undo/redo), user guide pages (done; the lead
+  corrected the PSU-header claim), Enable Banking UI (in progress), remaining currency displays and
+  stale provider mentions (in progress).
+- Repo docs: `CLAUDE.md`/`AGENTS.md` (also fixed: `insertNewTransaction` lives in `ruleService.ts`,
+  `autoCategory()` no longer exists) and `SECURITY.md`.

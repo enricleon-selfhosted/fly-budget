@@ -177,3 +177,29 @@ Accounts that appear for the first time are added unmapped.
 ## D19 — Tracking docs in English
 
 The repository's code and docs are in English, so these files are too.
+
+## D20 — PSU headers only with a real public address
+
+User-started syncs pass `Psu-Ip-Address` / `Psu-User-Agent` only when the request comes from a
+public IP (a self-hosted server behind a proxy that reports the client's address). The desktop
+app and LAN installs only see local addresses, which banks would refuse, so they send none and
+every read counts as unattended.
+
+## D21 — The budget currency is a per-device preference for now
+
+`currencyCode` sits next to `currencySymbol` in the preferences store (same pattern, no new
+server table). The server never needs it except when mapping bank accounts, where the client
+sends it. Accounts store a currency only when it differs from the budget's, so a device with a
+different preference can't corrupt data, only show a foreign account's badge differently.
+Moving it into the budget is listed under "Later" in the plan.
+
+## D22 — Foreign amounts show the ISO code and two decimals
+
+`formatCurrency(cents, currency)` shows "USD 1,234.50", not "$1,234.50", so a dollar account in
+a euro budget can't be mistaken for the budget's own symbol; two decimals always, because amounts
+are hundredths in every currency (D12).
+
+## D23 — One connection per bank
+
+Starting a new consent for a bank that already has a connection renews that connection instead
+of adding a second one (D18 applied to the "Connect a bank" path too).

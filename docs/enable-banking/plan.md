@@ -33,38 +33,40 @@ Status: ☐ to do · ◐ in progress · ☑ done · ⏸ deferred. Owner: **lead*
 | 2.4 | `mapping.ts` pure + property tests                                 | lead  | ☑      |
 | 2.5 | `dataSource.ts` + contract suite                                   | lead  | ☑      |
 | 2.6 | `consent.ts` + tests                                               | lead  | ☑      |
-| 2.7 | `store.ts`                                                         | lead  | ☐      |
-| 2.8 | `connectService.ts`, `accountMapping.ts`, `syncService.ts` + tests | lead  | ☐      |
+| 2.7 | `store.ts`                                                         | lead  | ☑      |
+| 2.8 | `connectService.ts`, `accountMapping.ts`, `syncService.ts` + tests | lead  | ☑      |
 
 ## Phase 3 — Server wiring
 
 | #   | Task                                                   | Owner | Status |
 | --- | ------------------------------------------------------ | ----- | ------ |
-| 3.1 | `routes/enableBanking.ts` + route tests                | lead  | ☐      |
-| 3.2 | Callback mounted before the guards + security tests    | lead  | ☐      |
-| 3.3 | `encryptStoredCredentials`, backup re-link, demo stubs | lead  | ☐      |
-| 3.4 | Startup sync (6-hour rule)                             | lead  | ☐      |
-| 3.5 | Net worth leaves out foreign-currency accounts         | lead  | ☐      |
+| 3.1 | `routes/enableBanking.ts` + route tests                | lead  | ☑      |
+| 3.2 | Callback mounted before the guards + security tests    | lead  | ☑      |
+| 3.3 | `encryptStoredCredentials`, backup re-link, demo stubs | lead  | ☑      |
+| 3.4 | Startup sync (6-hour rule)                             | lead  | ☑      |
+| 3.5 | Net worth leaves out foreign-currency accounts         | lead  | ☑      |
 
 ## Phase 4 — Client
 
 | #   | Task                                                                                                  | Owner | Status |
 | --- | ----------------------------------------------------------------------------------------------------- | ----- | ------ |
-| 4.1 | Types, `api/enableBanking.ts`, `hooks/useEnableBanking.ts` (+ consent polling hook)                   | lead  | ☐      |
-| 4.2 | Settings → Connected Banks: provider tab, config form, connection card                                | agent | ☐      |
-| 4.3 | Connect modal: country → bank → consent (paste fallback) → mapping → sync → summary                   | agent | ☐      |
-| 4.4 | Currency: `currencyCode` preference, `formatCurrency(cents, currency)`, account views, account modals | agent | ☐      |
-| 4.5 | "Unlink transfer" in the transaction detail panel                                                     | agent | ☐      |
-| 4.6 | Demo: `NotInDemo` wording, `ConnectedAccountsDemo`                                                    | agent | ☐      |
+| 4.1 | Types, `api/enableBanking.ts`, `hooks/useEnableBanking.ts` (+ consent polling hook)                   | lead  | ☑      |
+| 4.2 | Settings → Connected Banks: provider tab, config form, connection card                                | agent | ◐      |
+| 4.3 | Connect modal: country → bank → consent (paste fallback) → mapping → sync → summary                   | agent | ◐      |
+| 4.4 | Currency: `currencyCode` preference, `formatCurrency(cents, currency)`, account views, account modals | agent | ☑      |
+| 4.5 | "Unlink transfer" in the transaction detail panel                                                     | agent | ☑      |
+| 4.6 | Demo: `NotInDemo` wording, `ConnectedAccountsDemo`                                                    | agent | ◐      |
 
 ## Phase 5 — Docs and checks
 
 | #   | Task                                                                                      | Owner | Status |
 | --- | ----------------------------------------------------------------------------------------- | ----- | ------ |
-| 5.1 | `website/docs/bank-sync.mdx` (setup guide), `settings.mdx`, `privacy.mdx`, `security.mdx` | agent | ☐      |
-| 5.2 | `SECURITY.md`, `CLAUDE.md` + `AGENTS.md`                                                  | lead  | ☐      |
+| 5.1 | `website/docs/bank-sync.mdx` (setup guide), `settings.mdx`, `privacy.mdx`, `security.mdx` | agent | ☑      |
+| 5.2 | `SECURITY.md`, `CLAUDE.md` + `AGENTS.md`                                                  | lead  | ☑      |
 | 5.3 | Typecheck, tests, Prettier, client build                                                  | lead  | ☐      |
 | 5.4 | e2e: Settings shows the Enable Banking tab without page errors                            | lead  | ☐      |
+
+| 5.5 | Account amounts in their currency in the remaining places (add transaction, reconcile, update value, account reorder); stale provider mentions in the website | agent | ◐ |
 
 ## Later (not in this branch)
 
@@ -74,3 +76,7 @@ Status: ☐ to do · ◐ in progress · ☑ done · ⏸ deferred. Owner: **lead*
 - ⏸ Bank logos (server fetches once, stores a data URL).
 - ⏸ Periodic background sync in server mode (respecting D10).
 - ⏸ Consent-expiry reminder on the dashboard.
+- ⏸ Budget currency stored with the budget (server) instead of per device; decide what happens to
+  accounts already in a currency that becomes the budget's.
+- ⏸ "Link as transfer" for two existing transactions picked by hand (today only bank sync links).
+- ⏸ Amount inputs showing a foreign account's currency code instead of the budget symbol.
