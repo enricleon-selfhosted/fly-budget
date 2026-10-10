@@ -17,14 +17,19 @@ Choose **Add recurring** and fill in:
 
 - **Name**, like "Rent" or "Riley's paycheck".
 - **Amount** and **Type**: **Expense** or **Income**.
-- **Amount Precision**: **Exact** (always the same), **Approx** (close to it, within about 7.5%)
-  or **Variable** (it changes, like an electricity bill). This helps FlyBudget recognize the
-  payment when it arrives.
+- **Amount Precision**: **Exact** (always the same), **Approx** (close to it, within 10%) or
+  **Variable** (it changes, like an electricity bill or a pay that varies from week to week). This
+  helps FlyBudget recognize the payment when it arrives. A variable amount is only an estimate, so
+  a payment can be any amount when its payee or bank text recognizes the item.
 - **Frequency**: weekly, every two weeks, twice a month, monthly, quarterly, twice a year or
   yearly.
-- **Account**, **Start Date**, and an optional **End Date**.
+- **Account**, **Start Date**, and an optional **End Date**. The amount is in the account's
+  currency, so a pay into a pound account is entered in pounds.
 - **Payee**, **Category** and **Notes** (optional). The payee is what FlyBudget matches
   transactions against.
+- **Bank text contains** (optional): part of the text your bank shows for the payment, like
+  `ACME LTD`. It isn't case-sensitive, and FlyBudget checks the bank's own text and the notes, so a
+  payment still matches when the bank spells the company differently from your payee.
 - **Auto-create transactions**: FlyBudget adds the transaction for you on its due date (when
   FlyBudget starts on or after that day).
 
@@ -52,9 +57,12 @@ first.
 
 ## Paid, upcoming and missed
 
-When a transaction arrives that matches a recurring item (the same payee, near the expected date
-and amount), FlyBudget links them and marks it **Paid**. If it isn't sure, a banner at the top
-of the page says a transaction may match; choose **Review now** to accept or dismiss each match.
+When a bank import brings in a transaction that clearly belongs to a recurring item, FlyBudget
+links them and marks the payment **Paid**. The match is clear when the transaction is in the item's
+account, its payee or bank text recognizes the item, its amount fits the item's type, its date is
+within the item's date flexibility, and no other payment could be it. If it isn't sure, a banner at
+the top of the page says a transaction may match; choose **Review now** to accept or dismiss each
+match.
 
 Each item's status:
 
@@ -67,6 +75,22 @@ Each item's status:
 | **Missed**                | The date passed without a payment.                 |
 | **Skipped**               | You skipped this date.                             |
 | **Paused** / **Canceled** | The item is on hold, or no longer repeats.         |
+
+## Pay in another currency
+
+Say your pay comes in every week from ACME LTD in pounds, and the amount changes from one week to
+the next. Add it as income with:
+
+- **Account**: the pound account, so the amount is in pounds.
+- **Amount Precision**: **Variable**, with your usual pay as the estimate.
+- **Payee**: ACME LTD, and **Bank text contains** `ACME LTD` if the bank's text names the company
+  differently.
+- **Frequency**: weekly, and a **Date Flexibility** that covers the days the pay can arrive early or
+  late.
+
+Each week's pay is matched to its week as it arrives, whatever the amount. The pay stays in
+the pound account, which is off budget, until you change it into your budget's currency. See
+[Income in another currency](./accounts#income-in-another-currency).
 
 ## The Monthly tab
 

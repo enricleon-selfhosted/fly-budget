@@ -95,17 +95,43 @@ page or an account's page, pick **Transfer: _account name_** at the bottom of th
 (on the Transactions page, choose the account first). FlyBudget creates two linked transactions:
 money out of one account and into the other.
 
-Transfers are linked: change the date or amount on one side and the other follows. They have no
-category, and they're left out of income and spending.
+Transfers are linked: change the date on one side and the other follows. Changing the amount
+changes the other side too, as long as both accounts use the same currency.
+
+A transfer between two on-budget accounts, or between two off-budget accounts, has no category,
+and it's left out of income and spending. A transfer between an on-budget account and an off-budget
+one (an investment, property or loan account, for example) can have a category on its on-budget
+side: an income category when money comes into the budget, a spending category when it goes out.
+Income and spending reports count those transfers as well. See
+[Transfers and your budget](./budgeting#transfers-and-your-budget).
 
 Transactions imported with [Enable Banking](./bank-sync#enable-banking) become transfers too, when
 FlyBudget can tell that money moved between two of your accounts. The rules are in
-[How syncing works with Enable Banking](./bank-sync#how-syncing-works-with-enable-banking). FlyBudget
-never links transactions in different currencies.
+[How syncing works with Enable Banking](./bank-sync#how-syncing-works-with-enable-banking). Between
+accounts in different currencies, FlyBudget links only the exchanges it can recognize from the
+bank's text.
 
 To undo a link, open the transaction and choose **Unlink transfer**. Both sides become ordinary
 transactions again, with their amounts and dates kept and no category. For a transfer that came from
 your bank, the payee goes back to the bank's name for it. Reconciled transfers can't be unlinked.
+
+### Exchanges
+
+An exchange is a transfer between two accounts in different currencies, such as pounds into euros.
+Each side keeps the amount that really moved, so the rate is the one implied by the two amounts.
+FlyBudget doesn't look up exchange rates, and changing the amount on one side doesn't change the
+other.
+
+To enter an exchange by hand, choose an account in another currency as the transfer target, and
+enter the amount received, in that account's currency. [Income in another currency](./accounts#income-in-another-currency)
+walks through one.
+
+### Linking by hand
+
+Two transactions you already have can be made into a transfer. Open one of them and choose
+**Link as transfer**. FlyBudget lists the transactions in your other open accounts, within a week,
+that could be the other side, closest date first. Pick the right one. The two transactions must be
+in different accounts and go in opposite directions.
 
 ## Importing and syncing
 

@@ -126,13 +126,24 @@ if there isn't one.
   transactions, split parts and balance adjustments are never matched. Transactions imported from
   a CSV file aren't matched either; for an existing account, the Import from date starts after
   them, so the two don't overlap.
-- **Transfers are linked.** When money moves between two accounts in your budget, FlyBudget links
-  them as a [transfer](./transactions#transfers) if it's clear which transactions belong together.
-  That's the case when the bank names the other account by its IBAN and it's one of yours, or when
-  there's exactly one matching transaction in the other account, in the opposite direction, within
-  four days. Both accounts must use the same currency. If the other side isn't imported yet, the pair is
-  linked when it arrives and the match is clear. [Unlink transfer](./transactions#transfers)
-  undoes a link.
+- **Transfers are linked.** When money moves between two of your accounts in the same currency,
+  FlyBudget links them as a [transfer](./transactions#transfers) if it's clear which transactions
+  belong together. That's the case when the bank names the other account by its IBAN and it's one
+  of yours, or when there's exactly one transaction in the other account for the same amount in the
+  opposite direction, within four days. If the other side isn't imported yet, the pair is linked
+  when it arrives and the match is clear. [Unlink transfer](./transactions#transfers) undoes a link.
+- **Exchanges are recognized.** Money that moves between two of your accounts in different
+  currencies, such as pounds out of one account and euros into another, is linked as an
+  [exchange](./transactions#exchanges) when all of these are true: both accounts are imported from
+  the same bank connection; one movement goes out and the other comes in, at most a day apart; the
+  bank's text on either side names the other side's currency, like "Exchanged to EUR"; and no other
+  transaction could be the other side. Anything less certain stays unlinked, and you can link it
+  yourself with [Link as transfer](./transactions#linking-by-hand).
+- **Recurring payments are matched.** An imported transaction is matched to a
+  [recurring item](./recurring) when it clearly belongs to one: it's in the item's account, its
+  payee or bank text recognizes the item, its amount fits the item's type, its date is within the
+  item's date flexibility, and no other payment could be it. Anything less certain stays a
+  suggestion on the Recurring page. The sync's summary counts these matches too.
 - **Balances stay yours.** When FlyBudget creates an account from the bank, the first sync sets its
   starting balance so that it matches the bank's. After that, FlyBudget never changes your balances
   on its own, and a sync never changes the starting balance of an account you added to an existing
