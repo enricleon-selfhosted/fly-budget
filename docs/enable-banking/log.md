@@ -36,3 +36,31 @@
 - Not verified against the real Enable Banking API (needs a registered application and a linked
   bank account): the request/response shapes follow the API reference, and the fakes in the tests
   follow the same reference.
+
+### Phase 6 — income in another currency (Revolut case)
+
+- Product owner's case: paid weekly in GBP into a Revolut GBP account, budget in EUR, pounds
+  changed into euros between Revolut pockets. Asked for transfers across currencies and weekly
+  recurring income in another currency, with variable amounts, recognized by the bank's text.
+- Decisions D24–D29: foreign income counts when it becomes the budget currency; exchanges keep
+  each side's own amount (supersedes the earlier refusal of transfers across currencies); the
+  on-budget side of an on↔off-budget transfer can carry a category, and reports count those;
+  exchange recognition in bank imports; `match_text` and variable amounts for recurring items;
+  automatic one-to-one recurring matching on import.
+- Server (lead): pure `utils/transferRules.ts`, `linkTransfer` across currencies, `toAmount` and
+  `categoryId` on `POST /transactions/transfer`, `POST /:id/link-transfer` and
+  `GET /:id/transfer-candidates`, `isNotPlainTransfer` in reports, `pickExchangeCounterpart` in the
+  bank-sync core, pure `scheduleMatching.ts`, `schedules.match_text` (migration `0022`) and
+  `autoMatchImported` after each import.
+- Client (agents, reviewed by the lead): recurring amounts in the account's currency with
+  per-currency totals and a "Bank text contains" field; exchange amounts in the Add transaction
+  dialog and the register ("Received (CHF)"), the budget category on boundary transfers, the
+  exchange line with its implied rate in the detail panel, and "Link as transfer"
+  (`LinkTransferModal`). Review confirmed the register's transfer direction fix: an inflow
+  transfer used to move money out of the current account.
+- Guide: Revolut walkthrough (Accounts → Income in another currency), exchanges and linking by
+  hand (Transactions), transfers and the budget (Budgeting), recurring pay in another currency.
+- e2e: entering an exchange in the register (the amount received is required) and
+  "Link as transfer" from the detail panel.
+- Final checks: server 403 tests, client 150, e2e 124 (all projects), `tsc` clean in client and
+  server, Prettier clean.
