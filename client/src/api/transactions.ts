@@ -68,7 +68,12 @@ export function getTransactions(params: TransactionQueryParams = {}) {
 export const createTransaction = (data: CreateTransactionData) =>
   apiFetch<Transaction>('/transactions', { method: 'POST', body: JSON.stringify(data) });
 
-export const updateTransaction = (id: string, data: Partial<CreateTransactionData>) =>
+export type UpdateTransactionData = Partial<CreateTransactionData> & {
+  /** In an account in another currency: its value in the budget's currency, typed in (null = the day's rate) */
+  budgetAmount?: number | null;
+};
+
+export const updateTransaction = (id: string, data: UpdateTransactionData) =>
   apiFetch<Transaction>(`/transactions/${id}`, { method: 'PUT', body: JSON.stringify(data) });
 
 export const deleteTransaction = (id: string) =>
