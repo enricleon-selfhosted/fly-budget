@@ -59,14 +59,27 @@ Status: ☐ to do · ◐ in progress · ☑ done · ⏸ deferred. Owner: **lead*
 
 ## Phase 5 — Docs and checks
 
-| #   | Task                                                                                      | Owner | Status |
-| --- | ----------------------------------------------------------------------------------------- | ----- | ------ |
-| 5.1 | `website/docs/bank-sync.mdx` (setup guide), `settings.mdx`, `privacy.mdx`, `security.mdx` | agent | ☑      |
-| 5.2 | `SECURITY.md`, `CLAUDE.md` + `AGENTS.md`                                                  | lead  | ☑      |
-| 5.3 | Typecheck, tests, Prettier, client build                                                  | lead  | ☑      |
-| 5.4 | e2e: Settings shows the Enable Banking tab without page errors                            | lead  | ☑      |
+| #   | Task                                                                                                                                                          | Owner | Status |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ------ |
+| 5.1 | `website/docs/bank-sync.mdx` (setup guide), `settings.mdx`, `privacy.mdx`, `security.mdx`                                                                     | agent | ☑      |
+| 5.2 | `SECURITY.md`, `CLAUDE.md` + `AGENTS.md`                                                                                                                      | lead  | ☑      |
+| 5.3 | Typecheck, tests, Prettier, client build                                                                                                                      | lead  | ☑      |
+| 5.4 | e2e: Settings shows the Enable Banking tab without page errors                                                                                                | lead  | ☑      |
+| 5.5 | Account amounts in their currency in the remaining places (add transaction, reconcile, update value, account reorder); stale provider mentions in the website | agent | ☑      |
 
-| 5.5 | Account amounts in their currency in the remaining places (add transaction, reconcile, update value, account reorder); stale provider mentions in the website | agent | ☑ |
+## Phase 6 — Income in another currency (Revolut case, D24–D29)
+
+| #   | Task                                                                                                  | Owner | Status |
+| --- | ----------------------------------------------------------------------------------------------------- | ----- | ------ |
+| 6.1 | Exchange transfers: `linkTransfer` across currencies, amounts not mirrored, `toAmount` on create      | lead  | ☑      |
+| 6.2 | Category on the budget side of on↔off-budget transfers; reports count categorized transfers           | lead  | ☑      |
+| 6.3 | `POST /transactions/:id/link-transfer` (link two existing transactions by hand)                       | lead  | ☑      |
+| 6.4 | Exchange detection in bank imports (pure matcher + core pass)                                         | lead  | ☐      |
+| 6.5 | Recurring: `match_text` (migration `0022`), concept scoring, variable amounts, auto-match on import   | lead  | ☐      |
+| 6.6 | Client: exchange amounts in transfer forms, category on boundary transfers, "Link as transfer" picker | agent | ☐      |
+| 6.7 | Client: recurring amounts in the account's currency, per-currency totals, "bank text contains" field  | agent | ☐      |
+| 6.8 | Guide: income in another currency (Revolut walkthrough), transfers, recurring; tracking docs          | agent | ☐      |
+| 6.9 | Tests and e2e                                                                                         | lead  | ☐      |
 
 ## Later (not in this branch)
 

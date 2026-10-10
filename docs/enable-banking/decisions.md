@@ -203,3 +203,51 @@ are hundredths in every currency (D12).
 
 Starting a new consent for a bank that already has a connection renews that connection instead
 of adding a second one (D18 applied to the "Connect a bank" path too).
+
+## D24 — Income in another currency counts when it becomes the budget's currency
+
+Product owner's case: paid weekly in GBP into a Revolut GBP account, budget in EUR, GBP changed to
+EUR inside Revolut. The GBP account stays **off budget** (a tracking account, D11). Money enters
+the budget when it arrives in EUR: the EUR side of the exchange is categorized as income and
+counts toward To Be Budgeted, exactly what was received. This is how YNAB users handle foreign
+income, and it needs no exchange rates. Limitation: spending paid directly from the GBP account
+isn't budgeted. A budget that converts at a rate is a separate, later feature.
+
+## D25 — Exchanges are transfers between accounts in different currencies
+
+A transfer may link accounts in different currencies; each side keeps its own amount (opposite
+signs) and the rate is implied by the two. Editing one side's amount doesn't change the other
+(dates still move together). Creating one by hand needs the amount received (`toAmount`).
+Supersedes the refusal of cross-currency transfers added with D11's first implementation.
+
+## D26 — Transfers across the budget boundary carry a category on the budget side
+
+As in YNAB: a transfer between an on-budget and an off-budget account changes how much money the
+budget has, so its on-budget side may have a category — income when money comes in (an exchange
+into EUR, a withdrawal from savings tracked off budget), spending when it goes out (a
+contribution to an investment account). Transfers between two on-budget or two off-budget
+accounts stay uncategorized. `linkTransfer` keeps such a category, and income and spending
+reports count categorized transfers (they leave out only uncategorized ones).
+
+## D27 — Recognizing exchanges in bank data
+
+An imported transaction and one in another account become an exchange when: both accounts are in
+the same bank connection, their currencies differ, the directions are opposite, they're at most
+1 day apart, the bank text of either side names the other side's currency (e.g. "Exchanged to
+EUR"), and there's no other such candidate either way. Anything else stays unlinked and the user
+links it by hand with "Link as transfer" (`POST /api/transactions/:id/link-transfer`).
+
+## D28 — Recurring items identified by their bank text; variable amounts
+
+A recurring item may have a "bank text contains" (`schedules.match_text`, migration `0022`,
+case-insensitive, matched against the imported payee and notes); a match counts like a payee
+match. Amount types: `exact`, `approximate` (±10%), and `variable`, which no longer has to be
+within 25%: date, payee or bank text decide. Amounts are in the account's currency.
+
+## D29 — Imported transactions are matched to recurring items when it's clear
+
+After an import, each new transaction is matched to a pending occurrence of an active recurring
+item when: same account, same direction, within the item's date flexibility, the payee or bank
+text matches, the amount fits the item's type, and exactly one occurrence qualifies (and that
+occurrence has no other qualifying transaction in the batch). Otherwise it stays a suggestion on
+the Recurring page.

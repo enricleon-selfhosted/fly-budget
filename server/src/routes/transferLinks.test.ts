@@ -5,7 +5,7 @@ import type { Server } from 'http';
 import { eq } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { db } from '../db/index.js';
-import { transactions } from '../db/schema.js';
+import { categories, categoryGroups, transactions } from '../db/schema.js';
 import { linkTransfer } from '../services/transactionHelpers.js';
 import { accountsRouter } from './accounts.js';
 import { transactionsRouter } from './transactions.js';
@@ -18,6 +18,8 @@ let base: string;
 
 beforeAll(async () => {
   migrate(db, { migrationsFolder: 'src/db/migrations' });
+  db.insert(categoryGroups).values({ id: 'g-income', name: 'Income', isIncome: 1 }).run();
+  db.insert(categories).values({ id: 'c-salary', groupId: 'g-income', name: 'Salary' }).run();
   const app = express();
   app.use(express.json());
   app.use('/api/accounts', accountsRouter);
@@ -157,21 +159,119 @@ describe('POST /transactions/:id/unlink-transfer', () => {
   });
 });
 
-describe('POST /transactions/transfer', () => {
-  it('refuses a transfer between accounts in different currencies', async () => {
-    const { body: eur } = await send('POST', '/accounts', { name: 'EUR', type: 'checking' });
-    const { body: usd } = await send('POST', '/accounts', {
-      name: 'USD',
+describe('exchanges and transfers across the budget boundary', () => {
+  async function gbpAndEur() {
+    const { body: gbp } = await send('POST', '/accounts', {
+      name: 'GBP pocket',
       type: 'checking',
-      currency: 'USD',
+      currency: 'GBP',
     });
-    const res = await send('POST', '/transactions/transfer', {
-      fromAccountId: eur.id,
-      toAccountId: usd.id,
+    const { body: eur } = await send('POST', '/accounts', { name: 'EUR pocket', type: 'checking' });
+    return { gbp, eur };
+  }
+
+  it('an exchange needs the amount received, and keeps a different amount on each side', async () => {
+    const { gbp, eur } = await gbpAndEur();
+    const missing = await send('POST', '/transactions/transfer', {
+      fromAccountId: gbp.id,
+      toAccountId: eur.id,
+      date: '2096-03-12',
+      amount: 50_000,
+    });
+    expect(missing.status).toBe(400);
+    expect(missing.body.error).toMatch(/amount received/);
+
+    const { status, body: pair } = await send('POST', '/transactions/transfer', {
+      fromAccountId: gbp.id,
+      toAccountId: eur.id,
+      date: '2096-03-12',
+      amount: 50_000,
+      toAmount: 58_025,
+    });
+    expect(status).toBe(201);
+    expect(pair.map((t: { amount: number }) => t.amount)).toEqual([-50_000, 58_025]);
+  });
+
+  it('editing one side of an exchange moves the date but not the other amount', async () => {
+    const { gbp, eur } = await gbpAndEur();
+    const { body: pair } = await send('POST', '/transactions/transfer', {
+      fromAccountId: gbp.id,
+      toAccountId: eur.id,
+      date: '2096-03-12',
+      amount: 10_000,
+      toAmount: 11_600,
+    });
+    await send('PUT', `/transactions/${pair[1].id}`, { amount: 11_650, date: '2096-03-13' });
+    expect(row(pair[0].id)).toMatchObject({ amount: -10_000, date: '2096-03-13' });
+    expect(row(pair[1].id)).toMatchObject({ amount: 11_650 });
+
+    const flipped = await send('PUT', `/transactions/${pair[1].id}`, { amount: -11_650 });
+    expect(flipped.status).toBe(400);
+  });
+
+  it('the budget side of money coming from an off-budget account can be income', async () => {
+    const { gbp, eur } = await gbpAndEur();
+    const { body: pair } = await send('POST', '/transactions/transfer', {
+      fromAccountId: gbp.id,
+      toAccountId: eur.id,
+      date: '2096-03-12',
+      amount: 10_000,
+      toAmount: 11_600,
+      categoryId: null,
+    });
+    // The GBP side is off budget: no category there
+    const offSide = await send('PUT', `/transactions/${pair[0].id}`, { categoryId: 'c-salary' });
+    expect(offSide.status).toBe(400);
+    const onSide = await send('PUT', `/transactions/${pair[1].id}`, { categoryId: 'c-salary' });
+    expect(onSide.status).toBe(200);
+    expect(row(pair[1].id).categoryId).toBe('c-salary');
+  });
+
+  it('a transfer between two budget accounts never takes a category', async () => {
+    const { checking, savings } = await twoAccounts();
+    const { body: pair } = await send('POST', '/transactions/transfer', {
+      fromAccountId: checking.id,
+      toAccountId: savings.id,
       date: '2096-03-12',
       amount: 1_000,
     });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/same currency/);
+    expect(
+      (await send('PUT', `/transactions/${pair[1].id}`, { categoryId: 'c-salary' })).status,
+    ).toBe(400);
+    const created = await send('POST', '/transactions/transfer', {
+      fromAccountId: checking.id,
+      toAccountId: savings.id,
+      date: '2096-03-12',
+      amount: 1_000,
+      categoryId: 'c-salary',
+    });
+    expect(created.status).toBe(400);
+  });
+
+  it('links an exchange by hand, keeping the income category on the budget side', async () => {
+    const { gbp, eur } = await gbpAndEur();
+    const out = imported(gbp.id, -20_000, 'Exchanged to EUR');
+    const into = imported(eur.id, 23_210, 'Exchanged from GBP');
+    db.update(transactions).set({ categoryId: 'c-salary' }).where(eq(transactions.id, into)).run();
+
+    const { status } = await send('POST', `/transactions/${out}/link-transfer`, { otherId: into });
+    expect(status).toBe(200);
+    expect(row(out)).toMatchObject({
+      transferTransactionId: into,
+      categoryId: null,
+      amount: -20_000,
+    });
+    expect(row(into)).toMatchObject({
+      transferTransactionId: out,
+      categoryId: 'c-salary',
+      amount: 23_210,
+    });
+
+    // Two money-out transactions are not a transfer
+    const a = imported(gbp.id, -100, 'A');
+    const b = imported(eur.id, -100, 'B');
+    expect((await send('POST', `/transactions/${a}/link-transfer`, { otherId: b })).status).toBe(
+      400,
+    );
   });
 });

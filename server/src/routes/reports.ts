@@ -6,7 +6,12 @@ import type { Request, Response } from 'express';
 import { monthBounds } from '../utils/date.js';
 import { isLiabilityType } from '../utils/accountTypes.js';
 import { isMonth, isRealDate } from '../utils/validation.js';
-import { inAccountBalance, inBudgetCurrency, isIncomeOrSpending } from '../services/balances.js';
+import {
+  inAccountBalance,
+  inBudgetCurrency,
+  isIncomeOrSpending,
+  isNotPlainTransfer,
+} from '../services/balances.js';
 
 export const reportsRouter = Router();
 
@@ -167,7 +172,7 @@ reportsRouter.get('/spending-by-category', (req, res) => {
   // have no category and would otherwise show up as "Uncategorized"; income categories aren't spending
   const conditions = [
     eq(transactions.isParent, 0),
-    isNull(transactions.transferTransactionId),
+    isNotPlainTransfer,
     isIncomeOrSpending,
     inBudgetCurrency,
     sql`coalesce(${categoryGroups.isIncome}, 0) = 0`,
@@ -221,7 +226,7 @@ reportsRouter.get('/income-vs-expenses', (req, res) => {
         gte(transactions.date, monthBounds(from).from),
         lte(transactions.date, monthBounds(to).to),
         eq(transactions.isParent, 0),
-        isNull(transactions.transferTransactionId),
+        isNotPlainTransfer,
         isIncomeOrSpending,
         inBudgetCurrency,
       ),
@@ -308,7 +313,7 @@ reportsRouter.get('/daily-flow', (req, res) => {
         lte(transactions.date, monthBounds(to).to),
         eq(accounts.isOffBudget, 0),
         eq(transactions.isParent, 0),
-        isNull(transactions.transferTransactionId),
+        isNotPlainTransfer,
         isIncomeOrSpending,
       ),
     )
@@ -408,7 +413,7 @@ reportsRouter.get('/spending-comparison', (req, res) => {
           lte(transactions.date, to),
           // Real spending: a split counts once (through its parts), transfers aren't spending
           eq(transactions.isParent, 0),
-          isNull(transactions.transferTransactionId),
+          isNotPlainTransfer,
           isIncomeOrSpending,
           eq(accounts.isOffBudget, 0),
         ),
@@ -657,7 +662,7 @@ reportsRouter.get('/custom', (req, res) => {
     lte(transactions.date, monthBounds(to).to),
     // A split counts once, through its categorized parts; transfers only move money
     eq(transactions.isParent, 0),
-    isNull(transactions.transferTransactionId),
+    isNotPlainTransfer,
     isIncomeOrSpending,
     inBudgetCurrency,
   ];
