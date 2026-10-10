@@ -188,5 +188,18 @@ describe('backup and restore', () => {
     });
     expect(res.status).toBe(200);
     expect(getBudgetSettings().currency).toBe('CHF');
+
+    // A newer backup without settings or rates means none: they're replaced
+    saveManualRate('GBP', 'CHF', '2026-01-01', 0.9);
+    const empty = await send('POST', '/export/restore', {
+      format: 'flybudget-backup',
+      version: 2,
+      accounts: [],
+      budgetSettings: [],
+      exchangeRates: [],
+    });
+    expect(empty.status).toBe(200);
+    expect(getBudgetSettings().currency).toBeNull();
+    expect((await backup()).exchangeRates).toEqual([]);
   });
 });

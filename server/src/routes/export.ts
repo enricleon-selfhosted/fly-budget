@@ -7,6 +7,7 @@ import {
   parseBackup,
   restoreBackup,
   saveSafetyCopy,
+  tablesToKeep,
 } from '../services/backupService.js';
 import { eq, and, gte, lte } from 'drizzle-orm';
 import { isRealDate } from '../utils/validation.js';
@@ -114,7 +115,7 @@ exportRouter.post('/restore', express.json({ limit: RESTORE_BODY_LIMIT }), async
   }
   const safetyCopy = await saveSafetyCopy();
   try {
-    const restored = restoreBackup(data);
+    const restored = restoreBackup(data, tablesToKeep(req.body));
     // Conversions follow this installation's rates and budget currency
     refreshFx('all');
     res.json({ restored, safetyCopy });

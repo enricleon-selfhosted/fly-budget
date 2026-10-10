@@ -139,8 +139,21 @@ export async function saveSafetyCopy(): Promise<string | null> {
   return path.basename(file);
 }
 
+/** Tables a backup made before budgeting across currencies doesn't have at all */
+const ADDED_FOR_CURRENCIES = ['budgetSettings', 'exchangeRates'] as const;
+
+/**
+ * The tables to keep as they are when restoring `input`: those a backup made before budgeting
+ * across currencies doesn't have (the budget currency would otherwise be forgotten). A newer
+ * backup always lists them, even empty.
+ */
+export function tablesToKeep(input: unknown): BackupTable[] {
+  const body = (input ?? {}) as Record<string, unknown>;
+  return ADDED_FOR_CURRENCIES.filter((name) => body[name] === undefined);
+}
+
 /** Replaces all budget data with the backup's, in one transaction: all or nothing. */
-export function restoreBackup(data: Record<BackupTable, Row[]>) {
+export function restoreBackup(data: Record<BackupTable, Row[]>, keep: readonly BackupTable[] = []) {
   // Bank connections aren't in backups; remember which accounts they sync into
   const plaidLinks = db
     .select({ id: plaidAccountMappings.id, accountId: plaidAccountMappings.accountId })
@@ -158,12 +171,8 @@ export function restoreBackup(data: Record<BackupTable, Row[]>) {
     .where(isNotNull(enableBankingAccounts.accountId))
     .all();
   const restoredAccounts = new Set(data.accounts.map((a) => a.id as string));
-  // Backups from before budgeting across currencies have no settings or rates: keep this
-  // installation's (the budget currency would otherwise be forgotten)
   const kept: Partial<Record<BackupTable, Row[]>> = {};
-  for (const name of ['budgetSettings', 'exchangeRates'] as const) {
-    if (!data[name].length) kept[name] = db.select().from(TABLES[name]).all();
-  }
+  for (const name of keep) kept[name] = db.select().from(TABLES[name]).all();
 
   db.transaction((tx) => {
     // Foreign keys are checked once, at commit, so rows can go in table by table
