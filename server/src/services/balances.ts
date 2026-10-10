@@ -1,6 +1,6 @@
-import { and, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
+import { and, eq, isNull, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { accounts, transactions } from '../db/schema.js';
+import { transactions } from '../db/schema.js';
 
 // A split is stored as a parent row holding the full amount plus child rows holding
 // the parts, all in the same account. Account balances count the parent only;
@@ -42,12 +42,6 @@ export const sumBudgetValue = sql<number>`coalesce(sum(${budgetValue}), 0)`;
  * currency, and converted rows in others. Totals across accounts leave out the rest.
  */
 export const hasBudgetValue: SQL = sql`${budgetValue} is not null`;
-
-/** Superseded by hasBudgetValue; kept until the routes move over */
-export const inBudgetCurrency: SQL = inArray(
-  transactions.accountId,
-  db.select({ id: accounts.id }).from(accounts).where(isNull(accounts.currency)),
-);
 
 /** Sum of an account's transactions, as added to its starting balance. */
 export function accountTransactionSum(accountId: string): number {

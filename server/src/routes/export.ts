@@ -7,9 +7,11 @@ import {
   parseBackup,
   restoreBackup,
   saveSafetyCopy,
+  tablesToKeep,
 } from '../services/backupService.js';
 import { eq, and, gte, lte } from 'drizzle-orm';
 import { isRealDate } from '../utils/validation.js';
+import { refreshFx } from '../services/fx/fxService.js';
 
 export const exportRouter = Router();
 
@@ -113,7 +115,9 @@ exportRouter.post('/restore', express.json({ limit: RESTORE_BODY_LIMIT }), async
   }
   const safetyCopy = await saveSafetyCopy();
   try {
-    const restored = restoreBackup(data);
+    const restored = restoreBackup(data, tablesToKeep(req.body));
+    // Conversions follow this installation's rates and budget currency
+    refreshFx('all');
     res.json({ restored, safetyCopy });
   } catch (err) {
     // e.g. a row pointing at an account that isn't in the file: nothing was changed

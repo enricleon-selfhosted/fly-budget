@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { db } from '../db/index.js';
 import { accounts, budgetMonths, categories, categoryGroups, transactions } from '../db/schema.js';
-import { eq, and, gte, lte, lt, sql, inArray } from 'drizzle-orm';
+import { eq, and, gte, lte, lt, sql, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import { monthBounds } from '../utils/date.js';
 import { isMonth } from '../utils/validation.js';
+import { budgetValue, sumBudgetValue } from '../services/balances.js';
 
 export const budgetRouter = Router();
 
@@ -37,7 +38,7 @@ budgetRouter.get('/:month', (req, res) => {
   const spentRows = db
     .select({
       categoryId: transactions.categoryId,
-      spent: sql<number>`coalesce(sum(${transactions.amount}), 0)`,
+      spent: sumBudgetValue,
     })
     .from(transactions)
     .where(and(gte(transactions.date, from), lte(transactions.date, to), onBudget))
@@ -57,7 +58,7 @@ budgetRouter.get('/:month', (req, res) => {
   const priorActivityRows = db
     .select({
       categoryId: transactions.categoryId,
-      total: sql<number>`coalesce(sum(${transactions.amount}), 0)`,
+      total: sumBudgetValue,
     })
     .from(transactions)
     .where(and(lt(transactions.date, from), onBudget))
@@ -163,8 +164,8 @@ budgetRouter.get('/category/:categoryId/history', (req, res) => {
   const startDate = `${adjustedYear}-${String(adjustedMonth).padStart(2, '0')}-01`;
 
   const amountExpr = isIncome
-    ? sql<number>`coalesce(sum(max(${transactions.amount}, 0)), 0)`
-    : sql<number>`coalesce(sum(abs(min(${transactions.amount}, 0))), 0)`;
+    ? sql<number>`coalesce(sum(max(${budgetValue}, 0)), 0)`
+    : sql<number>`coalesce(sum(abs(min(${budgetValue}, 0))), 0)`;
 
   const rows = db
     .select({
@@ -261,7 +262,7 @@ budgetRouter.get('/:month/summary', (req, res) => {
   const { from, to } = monthBounds(month);
 
   const incomeRow = db
-    .select({ total: sql<number>`coalesce(sum(${transactions.amount}), 0)` })
+    .select({ total: sumBudgetValue })
     .from(transactions)
     .innerJoin(categories, eq(transactions.categoryId, categories.id))
     .innerJoin(categoryGroups, eq(categories.groupId, categoryGroups.id))
@@ -284,7 +285,7 @@ budgetRouter.get('/:month/summary', (req, res) => {
     .get();
 
   const priorIncomeRow = db
-    .select({ total: sql<number>`coalesce(sum(${transactions.amount}), 0)` })
+    .select({ total: sumBudgetValue })
     .from(transactions)
     .innerJoin(categories, eq(transactions.categoryId, categories.id))
     .innerJoin(categoryGroups, eq(categories.groupId, categoryGroups.id))
@@ -299,6 +300,23 @@ budgetRouter.get('/:month/summary', (req, res) => {
     .where(and(lt(budgetMonths.month, month), eq(categoryGroups.isIncome, 0)))
     .get();
 
+  // Categorized transactions in budget accounts in another currency that have no exchange rate
+  // yet: they don't count until they have one (docs/multi-currency M3)
+  const waitingRow = db
+    .select({ count: sql<number>`count(*)` })
+    .from(transactions)
+    .innerJoin(accounts, eq(transactions.accountId, accounts.id))
+    .where(
+      and(
+        lte(transactions.date, to),
+        eq(accounts.isOffBudget, 0),
+        isNotNull(accounts.currency),
+        isNull(transactions.fxRate),
+        isNotNull(transactions.categoryId),
+      ),
+    )
+    .get();
+
   // tbb = income + leftover from prior months - what's already budgeted
   const income = incomeRow?.total ?? 0;
   const totalBudgeted = budgetedRow?.total ?? 0;
@@ -310,5 +328,6 @@ budgetRouter.get('/:month/summary', (req, res) => {
     totalBudgeted,
     carryOver,
     toBeBudgeted: income + carryOver - totalBudgeted,
+    waitingForRate: waitingRow?.count ?? 0,
   });
 });

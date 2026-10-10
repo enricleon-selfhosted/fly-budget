@@ -31,8 +31,3 @@ export function startsOffBudget(
 ): 0 | 1 {
   return requested ?? (stored ? 1 : byType);
 }
-
-/** Superseded by startsOffBudget; kept until the accounts route moves over */
-export function offBudgetFor(stored: string | null, requested: 0 | 1): 0 | 1 {
-  return stored ? 1 : requested;
-}

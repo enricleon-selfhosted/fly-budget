@@ -20,6 +20,7 @@ import {
   dismissMatchSuggestion,
   getMatchSuggestions,
 } from '../services/matchingEngine.js';
+import { convertTransactions } from '../services/fx/fxService.js';
 
 export const schedulesRouter = Router();
 
@@ -511,6 +512,7 @@ schedulesRouter.post('/:id/mark-paid', (req, res) => {
   };
 
   db.insert(transactions).values(tx).run();
+  convertTransactions([txId]);
   linkOccurrenceToTransaction(occId, txId, 'manual', 100);
 
   res.status(201).json(tx);

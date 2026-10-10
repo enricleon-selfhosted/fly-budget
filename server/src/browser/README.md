@@ -20,8 +20,10 @@ visitor gets a private copy that disappears when they close the tab, and nothing
   - `db/secretCrypto.ts` → `secretCrypto.ts`: no encryption (the demo never stores credentials).
   - `path` → `path.ts`: throws if used (only restore's safety copy of the database file needs it).
 - `app.ts` mounts the budget routers like `index.ts` does and answers `/health`, `/auth/status` and
-  `/server/info` itself. Bank connections (`/plaid`, `/simplefin`) and sign-in are refused, and the
-  app shows "needs the FlyBudget app" instead of their setup screens (`NotInDemo`).
+  `/server/info` itself. Bank connections (`/plaid`, `/simplefin`, `/enablebanking`),
+  downloading exchange rates (`/currencies` is mounted without a download) and sign-in are
+  refused, and the app shows "needs the FlyBudget app" instead of their setup screens
+  (`NotInDemo`). Exchange rates typed in by hand work.
 - `worker.ts` opens an in-memory database, runs every migration in `db/migrations`, and loads the
   demo budget. "Start over" does the same again.
 - `../demo/demoBudget.ts` is the budget itself (pure: rows from today's date, the same every time
@@ -37,10 +39,10 @@ The demo is public, so it's built so that nothing a visitor types can reach anyo
 - **Every tab is its own demo.** The budget lives in the tab's worker, in memory. Nothing is
   shared between tabs or visitors, and there's no server to share it through. Reloading or
   closing the tab throws it away; "Start over" replaces it (and frees the old one's memory).
-- **Nothing leaves the browser.** Bank connections and sign-in are refused (`app.ts`), and the
-  app shows `NotInDemo` instead of their setup screens, so the demo never asks for bank
-  credentials. CSV imports, backups and restores run in the worker; downloads are saved from the
-  page (`downloadFromApi`). The e2e tests check that no request leaves `/demo/`.
+- **Nothing leaves the browser.** Bank connections, rate downloads and sign-in are refused
+  (`app.ts`), and the app shows `NotInDemo` instead of their setup screens, so the demo never asks
+  for bank credentials. CSV imports, backups and restores run in the worker; downloads are saved
+  from the page (`downloadFromApi`). The e2e tests check that no request leaves `/demo/`.
 - **The same strict CSP as the app**: only the demo's own files, plus WebAssembly for SQLite.
   The page carries it in a `<meta>` tag (`demoPage` in `client/vite.config.ts`), and
   `website/static/_headers` sends it as a header with `frame-ancestors 'none'`, `X-Frame-Options`

@@ -1,17 +1,22 @@
 import { Router } from 'express';
 import { db } from '../db/index.js';
 import { transactions, accounts, categories, categoryGroups, payees } from '../db/schema.js';
-import { eq, and, gte, lte, sql, inArray, lt, isNull } from 'drizzle-orm';
+import { eq, and, gte, lte, sql, inArray, lt } from 'drizzle-orm';
 import type { Request, Response } from 'express';
 import { monthBounds } from '../utils/date.js';
 import { isLiabilityType } from '../utils/accountTypes.js';
 import { isMonth, isRealDate } from '../utils/validation.js';
 import {
+  budgetValue,
+  hasBudgetValue,
   inAccountBalance,
-  inBudgetCurrency,
   isIncomeOrSpending,
   isNotPlainTransfer,
+  sumBudgetValue,
 } from '../services/balances.js';
+import { convertCents, latestRateOn, type DailyRate } from '../services/fx/conversion.js';
+import { pairRates } from '../services/fx/ratesStore.js';
+import { budgetCurrency } from '../services/fx/settings.js';
 
 export const reportsRouter = Router();
 
@@ -116,8 +121,15 @@ reportsRouter.get('/net-worth', (req, res) => {
 
   const periods = isDaily ? dayRange(from, to) : monthRange(from, to);
 
-  // Accounts in another currency can't be added up with the rest
-  const allAccounts = db.select().from(accounts).where(isNull(accounts.currency)).all();
+  // Accounts in another currency count at the rate of each period's end, and not at all before
+  // they have one (docs/multi-currency M6)
+  const allAccounts = db.select().from(accounts).all();
+  const budget = budgetCurrency();
+  const rates = new Map<string, DailyRate[]>();
+  for (const a of allAccounts) {
+    if (a.currency && budget && !rates.has(a.currency))
+      rates.set(a.currency, pairRates(a.currency, budget));
+  }
 
   const upperBound = isDaily ? to : monthBounds(to).to;
   const groupExpr = isDaily
@@ -151,12 +163,19 @@ reportsRouter.get('/net-worth', (req, res) => {
   const result = periods.map((period) => {
     let assets = 0,
       liabilities = 0;
+    const periodEnd = isDaily ? period : monthBounds(period).to;
     for (const c of cursors) {
       while (c.next < c.entries.length && c.entries[c.next].period <= period) {
         c.balance += c.entries[c.next++].total;
       }
-      if (isLiabilityType(c.acct.type)) liabilities += Math.abs(Math.min(c.balance, 0));
-      else assets += Math.max(c.balance, 0);
+      let value = c.balance;
+      if (c.acct.currency) {
+        const rate = latestRateOn(rates.get(c.acct.currency) ?? [], periodEnd);
+        if (!rate) continue;
+        value = convertCents(c.balance, rate.rate);
+      }
+      if (isLiabilityType(c.acct.type)) liabilities += Math.abs(Math.min(value, 0));
+      else assets += Math.max(value, 0);
     }
     return { month: period, assets, liabilities, netWorth: assets - liabilities };
   });
@@ -174,7 +193,7 @@ reportsRouter.get('/spending-by-category', (req, res) => {
     eq(transactions.isParent, 0),
     isNotPlainTransfer,
     isIncomeOrSpending,
-    inBudgetCurrency,
+    hasBudgetValue,
     sql`coalesce(${categoryGroups.isIncome}, 0) = 0`,
   ];
   if (from) conditions.push(gte(transactions.date, monthBounds(from).from));
@@ -187,7 +206,7 @@ reportsRouter.get('/spending-by-category', (req, res) => {
       categoryIcon: categories.icon,
       groupId: categoryGroups.id,
       groupName: categoryGroups.name,
-      totalSpent: sql<number>`coalesce(sum(${transactions.amount}), 0)`,
+      totalSpent: sumBudgetValue,
     })
     .from(transactions)
     .leftJoin(categories, eq(transactions.categoryId, categories.id))
@@ -215,7 +234,7 @@ reportsRouter.get('/income-vs-expenses', (req, res) => {
     .select({
       month: sql<string>`strftime('%Y-%m', ${transactions.date})`,
       isIncome,
-      total: sql<number>`coalesce(sum(${transactions.amount}), 0)`,
+      total: sumBudgetValue,
       outflowCount: sql<number>`sum(case when ${transactions.amount} < 0 then 1 else 0 end)`,
     })
     .from(transactions)
@@ -228,7 +247,7 @@ reportsRouter.get('/income-vs-expenses', (req, res) => {
         eq(transactions.isParent, 0),
         isNotPlainTransfer,
         isIncomeOrSpending,
-        inBudgetCurrency,
+        hasBudgetValue,
       ),
     )
     .groupBy(sql`strftime('%Y-%m', ${transactions.date})`, isIncome)
@@ -272,7 +291,7 @@ reportsRouter.get('/cash-flow', (req, res) => {
   const txRows = db
     .select({
       month: sql<string>`strftime('%Y-%m', ${transactions.date})`,
-      net: sql<number>`coalesce(sum(${transactions.amount}), 0)`,
+      net: sumBudgetValue,
     })
     .from(transactions)
     .innerJoin(accounts, eq(transactions.accountId, accounts.id))
@@ -301,8 +320,8 @@ reportsRouter.get('/daily-flow', (req, res) => {
   const rows = db
     .select({
       date: transactions.date,
-      income: sql<number>`coalesce(sum(case when ${transactions.amount} > 0 then ${transactions.amount} else 0 end), 0)`,
-      expenses: sql<number>`coalesce(sum(case when ${transactions.amount} < 0 then -${transactions.amount} else 0 end), 0)`,
+      income: sql<number>`coalesce(sum(case when ${transactions.amount} > 0 then ${budgetValue} else 0 end), 0)`,
+      expenses: sql<number>`coalesce(sum(case when ${transactions.amount} < 0 then -${budgetValue} else 0 end), 0)`,
       count: sql<number>`count(distinct coalesce(${transactions.parentTransactionId}, ${transactions.id}))`,
     })
     .from(transactions)
@@ -327,7 +346,7 @@ reportsRouter.get('/income-by-category', (req, res) => {
   const range = optionalMonthParams(req, res);
   if (!range) return;
   const { from, to } = range;
-  const conditions = [eq(categoryGroups.isIncome, 1), inBudgetCurrency];
+  const conditions = [eq(categoryGroups.isIncome, 1), hasBudgetValue];
   if (from) conditions.push(gte(transactions.date, monthBounds(from).from));
   if (to) conditions.push(lte(transactions.date, monthBounds(to).to));
 
@@ -338,7 +357,7 @@ reportsRouter.get('/income-by-category', (req, res) => {
       categoryIcon: categories.icon,
       groupId: categoryGroups.id,
       groupName: categoryGroups.name,
-      totalReceived: sql<number>`coalesce(sum(${transactions.amount}), 0)`,
+      totalReceived: sumBudgetValue,
     })
     .from(transactions)
     .leftJoin(categories, eq(transactions.categoryId, categories.id))
@@ -358,7 +377,7 @@ reportsRouter.get('/spending-trends', (req, res) => {
   if (typeof category_ids !== 'string' || !category_ids) return res.json([]);
 
   const ids = category_ids.split(',');
-  const conditions = [inBudgetCurrency];
+  const conditions = [hasBudgetValue];
   if (from) conditions.push(gte(transactions.date, monthBounds(from).from));
   if (to) conditions.push(lte(transactions.date, monthBounds(to).to));
   // Daily totals (for short ranges) put the date (yyyy-MM-dd) in `month`
@@ -373,7 +392,7 @@ reportsRouter.get('/spending-trends', (req, res) => {
       categoryName: categories.name,
       categoryIcon: categories.icon,
       month: period,
-      total: sql<number>`coalesce(sum(${transactions.amount}), 0)`,
+      total: sumBudgetValue,
     })
     .from(transactions)
     .leftJoin(categories, eq(transactions.categoryId, categories.id))
@@ -402,7 +421,7 @@ reportsRouter.get('/spending-comparison', (req, res) => {
     const rows = db
       .select({
         date: transactions.date,
-        total: sql<number>`coalesce(sum(${transactions.amount}), 0)`,
+        total: sumBudgetValue,
       })
       .from(transactions)
       .innerJoin(accounts, eq(transactions.accountId, accounts.id))
@@ -664,7 +683,7 @@ reportsRouter.get('/custom', (req, res) => {
     eq(transactions.isParent, 0),
     isNotPlainTransfer,
     isIncomeOrSpending,
-    inBudgetCurrency,
+    hasBudgetValue,
   ];
 
   if (balance_type === 'expense') conditions.push(lt(transactions.amount, 0));
@@ -716,7 +735,7 @@ reportsRouter.get('/custom', (req, res) => {
       name: groupByCol.name,
       id: groupByCol.id,
       ...(mode === 'time' ? { month: sql<string>`strftime('%Y-%m', ${transactions.date})` } : {}),
-      value: sql<number>`coalesce(sum(${transactions.amount}), 0)`,
+      value: sumBudgetValue,
     })
     .from(transactions)
     .leftJoin(categories, eq(transactions.categoryId, categories.id))
@@ -757,7 +776,7 @@ reportsRouter.get('/custom', (req, res) => {
       .orderBy(
         group_by === 'month'
           ? sql`strftime('%Y-%m', ${transactions.date})`
-          : sql`abs(sum(${transactions.amount})) desc`,
+          : sql`abs(sum(${budgetValue})) desc`,
       )
       .all() as { name: string | null; id: string | null; value: number }[];
 
