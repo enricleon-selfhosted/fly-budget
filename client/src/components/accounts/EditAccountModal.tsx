@@ -12,6 +12,7 @@ import { AccountTypeSelect } from './AccountTypeSelect';
 import { fileToSquareDataUrl } from '../../utils/imageResize';
 import { usePreferencesStore } from '../../store/preferencesStore';
 import { otherCurrencyCodes, useBudgetCurrency } from '../../utils/budgetCurrency';
+import { ForeignBudgetHint } from './ForeignBudgetHint';
 
 interface Props {
   account: Account | null;
@@ -26,11 +27,13 @@ export function EditAccountModal({ account, onClose }: Props) {
   // The account's own currency; null = the budget's
   const [currency, setCurrency] = useState<string | null>(null);
   const [confirmClose, setConfirmClose] = useState(false);
+  // Transfers the last save uncategorized (M8); set, the dialog stays open to say so
+  const [uncategorized, setUncategorized] = useState<number | null>(null);
   const canSave = useCanSave();
   const budget = useBudgetCurrency();
-  // Accounts in another currency are always off budget (the server refuses otherwise)
   const foreign = currency !== null;
-  const offBudget = foreign || isOffBudget;
+  // Moving the account on or off budget makes some transfers stop crossing the budget (M8)
+  const budgetStatusChanges = account !== null && isOffBudget !== (account.isOffBudget === 1);
   const [logo, setLogo] = useState<string | null>(null);
   const [logoError, setLogoError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -49,28 +52,27 @@ export function EditAccountModal({ account, onClose }: Props) {
     setCurrency(account.currency ?? null);
     setLogo(account.logo ?? null);
     setLogoError(null);
+    setUncategorized(null);
   });
-
-  function handleCurrencyChange(next: string | null) {
-    setCurrency(next);
-    // Going back to the budget's currency doesn't put the account back on budget
-    if (next !== null) setIsOffBudget(true);
-  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!account || !name.trim()) return;
-    await updateAccount.mutateAsync({
+    // After a save that reported uncategorized transfers, the form only offers Done
+    if (uncategorized !== null) return onClose();
+    const saved = await updateAccount.mutateAsync({
       id: account.id,
       data: {
         name: name.trim(),
         type,
         startingBalance,
-        isOffBudget: offBudget ? 1 : 0,
+        isOffBudget: isOffBudget ? 1 : 0,
         currency,
         ...(logo !== (account.logo ?? null) ? { logo } : {}),
       },
     });
+    const moved = saved.transfersUncategorized ?? 0;
+    if (moved > 0) return setUncategorized(moved);
     onClose();
   }
 
@@ -162,7 +164,7 @@ export function EditAccountModal({ account, onClose }: Props) {
             <select
               aria-label="Currency"
               value={currency ?? ''}
-              onChange={(e) => handleCurrencyChange(e.target.value || null)}
+              onChange={(e) => setCurrency(e.target.value || null)}
               className="block w-full rounded-lg border border-border px-3 py-2 text-sm bg-surface text-text focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 max-md:min-h-11"
             >
               <option value="">{`Budget currency (${budget})`}</option>
@@ -186,25 +188,36 @@ export function EditAccountModal({ account, onClose }: Props) {
             />
           </div>
 
-          <label
-            className={`flex items-center gap-3 max-md:min-h-11 ${foreign ? 'cursor-not-allowed' : 'cursor-pointer'}`}
-          >
-            <input
-              type="checkbox"
-              checked={offBudget}
-              disabled={foreign}
-              onChange={(e) => setIsOffBudget(e.target.checked)}
-              className="h-4 w-4 rounded border-border text-brand-600 focus:ring-brand-500 disabled:opacity-60"
-            />
-            <span className="text-sm text-text-secondary">
-              Off budget (excluded from budgeting)
-              {foreign && (
-                <span className="block text-xs text-text-tertiary">
-                  Accounts in another currency stay off budget.
-                </span>
-              )}
-            </span>
-          </label>
+          <div>
+            <label className="flex items-center gap-3 max-md:min-h-11 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isOffBudget}
+                onChange={(e) => setIsOffBudget(e.target.checked)}
+                className="h-4 w-4 rounded border-border text-brand-600 focus:ring-brand-500"
+              />
+              <span className="text-sm text-text-secondary">
+                Off budget (excluded from budgeting)
+                {currency !== null && (
+                  <ForeignBudgetHint currency={currency} offBudget={isOffBudget} />
+                )}
+              </span>
+            </label>
+            {budgetStatusChanges && (
+              <p className="mt-1.5 text-xs text-caution">
+                Transfers between this account and others that no longer cross the budget lose their
+                category when you save.
+              </p>
+            )}
+          </div>
+
+          {uncategorized !== null && (
+            <p role="status" className="text-sm text-text-secondary">
+              {uncategorized === 1
+                ? '1 transfer lost its category because it no longer crosses the budget.'
+                : `${uncategorized} transfers lost their category because they no longer cross the budget.`}
+            </p>
+          )}
 
           <SavingPausedHint className="text-right" />
           <div className="flex items-center justify-between pt-2 border-t border-border-light">
@@ -215,22 +228,31 @@ export function EditAccountModal({ account, onClose }: Props) {
             >
               Close Account
             </button>
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-4 py-2 text-sm font-medium text-text-secondary bg-surface border border-border rounded-lg hover:bg-hover transition-colors"
-              >
-                Cancel
-              </button>
+            {uncategorized !== null ? (
               <button
                 type="submit"
-                disabled={!name.trim() || updateAccount.isPending || !canSave}
-                className="px-4 py-2 text-sm font-medium text-white bg-brand-600 rounded-lg hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="px-4 py-2 text-sm font-medium text-white bg-brand-600 rounded-lg hover:bg-brand-700 transition-colors"
               >
-                {updateAccount.isPending ? 'Saving…' : 'Save'}
+                Done
               </button>
-            </div>
+            ) : (
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-4 py-2 text-sm font-medium text-text-secondary bg-surface border border-border rounded-lg hover:bg-hover transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!name.trim() || updateAccount.isPending || !canSave}
+                  className="px-4 py-2 text-sm font-medium text-white bg-brand-600 rounded-lg hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {updateAccount.isPending ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            )}
           </div>
         </form>
       </Modal>

@@ -53,14 +53,14 @@ See [Backups and exports](./backups).
 
 **Reset to defaults** puts them all back. Preferences are saved in your browser (or in the
 desktop app) rather than in your budget, so each device can have its own. **Budget Currency** is
-the exception: it belongs to the budget. Changing it when you have accounts in other currencies is
+the exception: it belongs to the budget, and **Reset to defaults** leaves it alone. Changing it when you have accounts in other currencies is
 explained in [Accounts](./accounts#changing-your-budgets-currency).
 
 ## Currencies
 
 Exchange rates for [accounts in another currency](./accounts#accounts-in-another-currency). For
-each currency your accounts use, it shows the latest rate, how many transactions are still waiting
-for one, and the rates FlyBudget has.
+each currency your accounts use, it shows the latest rate and how many transactions are still
+waiting for one.
 
 - **Download daily exchange rates** gets the European Central Bank's daily rates, through
   [Frankfurter](https://frankfurter.dev). It's off until you turn it on. FlyBudget then sends only
@@ -68,7 +68,8 @@ for one, and the rates FlyBudget has.
   downloads what's missing when it starts, after a bank sync, when you add an account in another
   currency, and when you choose **Update now**. The bank publishes rates for about 30 currencies
   on working days; a weekend or holiday uses the last working day's rate.
-- **Add a rate** sets the rate for a date yourself. It applies from that date until the next rate,
+- **Rates**, next to each currency, lists the rates FlyBudget has. **Add a rate** sets the rate
+  for a date yourself. It applies from that date until the next rate,
   and a download never replaces it. Use it for a currency the bank doesn't publish, or if you'd
   rather not download rates. You can delete rates you added.
 

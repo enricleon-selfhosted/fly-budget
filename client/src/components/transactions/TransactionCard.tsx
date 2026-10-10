@@ -3,6 +3,7 @@ import { ArrowLeftRight, ChevronRight, Lock, Split } from 'lucide-react';
 import { PayeeIcon } from '../payees/PayeeIcon';
 import { formatCurrency } from '../../utils/currency';
 import { usePreferencesStore } from '../../store/preferencesStore';
+import { BudgetValueNote } from './BudgetValueNote';
 import type { Transaction, PayeeWithCount } from '../../types';
 
 interface Props {
@@ -73,11 +74,14 @@ export function TransactionCard({
           <span className="flex-1 min-w-0 truncate text-[15px] font-medium text-text">
             {payeeName}
           </span>
-          <span
-            className={`shrink-0 text-[15px] font-medium tabular-nums ${tx.amount > 0 ? 'text-positive' : 'text-text'}`}
-          >
-            {tx.amount > 0 ? '+' : ''}
-            {formatCurrency(Math.abs(tx.amount), currency)}
+          <span className="shrink-0 grid justify-items-end">
+            <span
+              className={`text-[15px] font-medium tabular-nums ${tx.amount > 0 ? 'text-positive' : 'text-text'}`}
+            >
+              {tx.amount > 0 ? '+' : ''}
+              {formatCurrency(Math.abs(tx.amount), currency)}
+            </span>
+            <BudgetValueNote tx={tx} />
           </span>
         </span>
         <span className="flex items-center gap-1.5 text-xs text-text-tertiary min-w-0">

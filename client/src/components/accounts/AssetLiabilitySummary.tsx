@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { formatCurrency } from '../../utils/currency';
 import { chartColors } from '../../utils/chartColors';
 import { accountTypeInfo } from '../../utils/accountTypes';
+import { accountsWithoutRate, valueInBudget } from '../../utils/accountValues';
 import type { Account, AccountGroup } from '../../types';
 
 interface Bucket {
@@ -29,26 +30,22 @@ interface Props {
 }
 
 export function AssetLiabilitySummary({ accounts }: Props) {
-  const { assets, liabilities, otherCurrencies } = useMemo(() => {
-    // Sums per group, and which groups have any accounts at all
+  const { assets, liabilities, missingRate } = useMemo(() => {
+    // Sums per group, in the budget's currency. An account in another currency counts at its
+    // balance at the latest rate, in its own type group; one without a rate is left out.
     const assetSums = new Map<AccountGroup, number>();
     const liabilitySums = new Map<AccountGroup, number>();
-    // Accounts in another currency can't be added to the budget currency's totals (there are
-    // no exchange rates): their net balance per currency is shown on its own line
-    const otherSums = new Map<string, number>();
     for (const a of accounts) {
-      if (a.currency !== null) {
-        otherSums.set(a.currency, (otherSums.get(a.currency) ?? 0) + a.balance);
-        continue;
-      }
+      const value = valueInBudget(a);
+      if (value === null) continue;
       const info = accountTypeInfo(a.type);
       const sums = info.liability ? liabilitySums : assetSums;
-      sums.set(info.group, (sums.get(info.group) ?? 0) + a.balance);
+      sums.set(info.group, (sums.get(info.group) ?? 0) + value);
     }
     return {
       assets: assetSums,
       liabilities: liabilitySums,
-      otherCurrencies: [...otherSums],
+      missingRate: accountsWithoutRate(accounts),
     };
   }, [accounts]);
 
@@ -68,14 +65,18 @@ export function AssetLiabilitySummary({ accounts }: Props) {
         emptyText="No credit cards or loans yet."
         owed
       />
-      {otherCurrencies.length > 0 && (
+      {missingRate.length > 0 && (
         <>
           <div className="border-t border-border-light my-4" />
-          <p className="text-sm text-text-secondary">
-            Other currencies:{' '}
-            <span className="font-medium tabular-nums text-text">
-              {otherCurrencies.map(([code, sum]) => formatCurrency(sum, code)).join(' · ')}
-            </span>
+          <p className="text-sm text-text-tertiary">
+            Not in these totals, as they have no exchange rate yet:{' '}
+            {missingRate.map((a) => `${a.name} (${a.currency})`).join(', ')}.{' '}
+            <Link
+              to="/settings?tab=currencies"
+              className="font-medium text-brand-600 hover:text-brand-700 whitespace-nowrap"
+            >
+              Add exchange rates
+            </Link>
           </p>
         </>
       )}

@@ -21,7 +21,9 @@ import { formatCurrency } from '../utils/currency';
 import NetWorthMini from '../components/dashboard/NetWorthMini';
 import { ACCOUNT_GROUPS, type Account, type AccountGroup } from '../types';
 import { AccountIcon } from '../components/accounts/AccountIcon';
+import { BudgetValue } from '../components/accounts/BudgetValue';
 import { accountTypeInfo, accountTypeLabel } from '../utils/accountTypes';
+import { changeInBudget, totalInBudget, valueInBudget } from '../utils/accountValues';
 
 function groupAccountsByType(accounts: Account[]) {
   const groups = new Map<AccountGroup, Account[]>();
@@ -46,15 +48,12 @@ interface AccountGroupProps {
 function AccountGroup({ label, accounts, balancesAgo }: AccountGroupProps) {
   const [collapsed, setCollapsed] = useState(false);
   const navigate = useNavigate();
-  // Totals add up one currency: accounts in another currency are shown in theirs, not added here
-  const inBudgetCurrency = accounts.filter((a) => a.currency === null);
-  const groupTotal = inBudgetCurrency.reduce((sum, a) => sum + a.balance, 0);
-  const groupTotalAgo = inBudgetCurrency.reduce(
-    (sum, a) => sum + (balancesAgo[a.id] ?? a.balance),
-    0,
-  );
-  const change = groupTotal - groupTotalAgo;
-  const changePct = groupTotalAgo !== 0 ? (change / Math.abs(groupTotalAgo)) * 100 : 0;
+  // Totals are in the budget's currency: an account in another currency counts at its balance at
+  // the latest rate, and one without a rate is left out (utils/accountValues.ts)
+  const groupTotal = totalInBudget(accounts);
+  const hasValue = accounts.some((a) => valueInBudget(a) !== null);
+  const { change, base } = changeInBudget(accounts, balancesAgo);
+  const changePct = base !== 0 ? (change / Math.abs(base)) * 100 : 0;
 
   return (
     <Card padding="none">
@@ -80,7 +79,7 @@ function AccountGroup({ label, accounts, balancesAgo }: AccountGroupProps) {
           )}
           <span className="text-xs text-text-tertiary">past month</span>
         </div>
-        {inBudgetCurrency.length > 0 && (
+        {hasValue && (
           <span
             className={`text-base font-semibold tabular-nums ${groupTotal < 0 ? 'text-negative' : 'text-text'}`}
           >
@@ -119,9 +118,12 @@ function AccountGroup({ label, accounts, balancesAgo }: AccountGroupProps) {
                   </div>
                 </div>
               </div>
-              <span className="text-sm font-medium tabular-nums text-text">
-                {formatCurrency(account.balance, account.currency)}
-              </span>
+              <div className="text-right">
+                <span className="block text-sm font-medium tabular-nums text-text">
+                  {formatCurrency(account.balance, account.currency)}
+                </span>
+                <BudgetValue account={account} className="block text-xs tabular-nums" />
+              </div>
             </div>
           ))}
         </div>

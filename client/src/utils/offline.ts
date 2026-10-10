@@ -15,6 +15,7 @@ export const OFFLINE_QUERY_KEYS: ReadonlySet<string> = new Set([
   'budget-summary',
   'categories',
   'category-history',
+  'currencies',
   'custom-reports',
   'dashboards',
   'goals',

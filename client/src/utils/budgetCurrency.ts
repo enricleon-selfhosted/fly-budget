@@ -1,8 +1,9 @@
+import { useCurrencies } from '../hooks/useCurrencies';
 import { usePreferencesStore } from '../store/preferencesStore';
 
 // A budget has one currency. Accounts in another one store its ISO code (`Account.currency`);
-// null means the budget's. Until the user picks the budget currency in Preferences, it is
-// guessed from the currency symbol they chose.
+// null means the budget's. The server stores the budget's currency; until it has one, this
+// device's preference is used, guessed from the currency symbol when none was chosen.
 
 /** Currencies offered in Preferences and on accounts (the budget's and any others) */
 export const CURRENCY_CODES = [
@@ -55,10 +56,12 @@ export function budgetCurrency(code: string | null, symbol: string): string {
   return CODE_FOR_SYMBOL.get(symbol.trim()) ?? 'USD';
 }
 
+/** The budget's currency: the server's once it has one (docs/multi-currency M2), else this device's */
 export function useBudgetCurrency(): string {
   const code = usePreferencesStore((s) => s.currencyCode);
   const symbol = usePreferencesStore((s) => s.currencySymbol);
-  return budgetCurrency(code, symbol);
+  const server = useCurrencies().data?.budgetCurrency;
+  return server ?? budgetCurrency(code, symbol);
 }
 
 /** The currency an account's amounts are in */

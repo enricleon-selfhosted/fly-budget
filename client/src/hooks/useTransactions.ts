@@ -11,6 +11,20 @@ function findTxInCache(qc: QueryClient, id: string): Transaction | undefined {
   }
 }
 
+/** Budget and report figures that a transaction's amount, date, category or value moves */
+const FIGURE_KEYS = [
+  'budget',
+  'budget-summary',
+  'reports',
+  'category-history',
+  'dashboards',
+  'currencies',
+];
+
+function refreshFigures(qc: QueryClient) {
+  for (const key of FIGURE_KEYS) qc.invalidateQueries({ queryKey: [key] });
+}
+
 export function useTransactions(params: TransactionQueryParams = {}) {
   return useQuery({
     queryKey: ['transactions', params],
@@ -66,8 +80,10 @@ export function useUpdateTransaction() {
     onSuccess: (_, { id, data }, ctx) => {
       qc.invalidateQueries({ queryKey: ['transactions'] });
       qc.invalidateQueries({ queryKey: ['accounts'] });
+      refreshFigures(qc);
       if (!ctx?.old) return;
       const snapshot = ctx.old;
+      const valueChanged = data.budgetAmount !== undefined;
       useUndoStore.getState().push({
         description: `Edit transaction`,
         undo: async () => {
@@ -79,14 +95,23 @@ export function useUpdateTransaction() {
             payeeName: snapshot.payeeName,
             categoryId: snapshot.categoryId,
             notes: snapshot.notes,
+            // Back to the value typed in before, or to the day's rate when there wasn't one
+            ...(valueChanged
+              ? {
+                  budgetAmount:
+                    snapshot.fxSource === 'manual' ? (snapshot.budgetAmount ?? null) : null,
+                }
+              : {}),
           });
           qc.invalidateQueries({ queryKey: ['transactions'] });
           qc.invalidateQueries({ queryKey: ['accounts'] });
+          refreshFigures(qc);
         },
         redo: async () => {
           await txApi.updateTransaction(id, data);
           qc.invalidateQueries({ queryKey: ['transactions'] });
           qc.invalidateQueries({ queryKey: ['accounts'] });
+          refreshFigures(qc);
         },
       });
     },

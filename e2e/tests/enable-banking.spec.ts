@@ -31,7 +31,10 @@ test.describe('Enable Banking setup', () => {
 });
 
 test.describe('accounts in another currency', () => {
-  test('are created off budget and stay out of the totals', async ({ page, api }) => {
+  test('start off budget and stay out of the totals until they have a rate', async ({
+    page,
+    api,
+  }) => {
     await api.createAccount('Everyday', 100_000);
     await open(page, '/accounts');
     await page.getByRole('main').getByRole('button', { name: 'Add Account' }).click();
@@ -39,15 +42,17 @@ test.describe('accounts in another currency', () => {
     const dialog = page.getByRole('dialog', { name: 'Add Account' });
     await dialog.getByRole('textbox', { name: 'Account name' }).fill('Franc pocket');
     await dialog.getByRole('combobox', { name: 'Currency' }).selectOption('CHF');
+    // It starts off budget, but can be put on budget (docs/multi-currency M1)
     const offBudget = dialog.getByRole('checkbox', { name: /Off budget/ });
     await expect(offBudget).toBeChecked();
-    await expect(offBudget).toBeDisabled();
+    await expect(offBudget).toBeEnabled();
     await dialog.getByRole('button', { name: 'Add Account' }).click();
 
     await expect
       .poll(async () => (await api.accounts()).find((a) => a.name === 'Franc pocket'))
       .toMatchObject({ currency: 'CHF', isOffBudget: 1 });
-    await expect(page.getByText(/Other currencies/)).toBeVisible();
+    // Without an exchange rate it can't be added to the totals yet
+    await expect(page.getByText(/Not in these totals/)).toBeVisible();
   });
 
   test('a transfer to an account in another currency is an exchange with its own amount', async ({

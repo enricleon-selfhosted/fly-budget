@@ -15,7 +15,7 @@ The choice is per account.
 
 ## Status
 
-In progress on `feat/multi-currency-budget`, which starts from `feat/enable-banking`.
+Implemented on `feat/multi-currency-budget`, which starts from `feat/enable-banking`; follow-ups are listed under "Later" in [plan.md](plan.md).
 
 ## Scope in one paragraph
 
