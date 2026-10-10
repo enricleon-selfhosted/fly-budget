@@ -1,9 +1,11 @@
 import { db } from '../db/index.js';
 import { accounts, payees, transactions } from '../db/schema.js';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNotNull, or } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/sqlite-core';
 import { nanoid } from 'nanoid';
 import { unlinkOccurrenceByTransactionId } from './matchingEngine.js';
 import { sideTakesCategory, transferPairProblem } from '../utils/transferRules.js';
+import { convertTransactions } from './fx/fxService.js';
 
 export function resolvePayee(
   payeeName: string | null | undefined,
@@ -68,6 +70,13 @@ type TransferOutcome = { ok: true } | { ok: false; status: 400 | 403 | 404; erro
  * recognizes money moving between the user's own accounts, and by "Link as transfer".
  */
 export function linkTransfer(aId: string, bId: string): TransferOutcome {
+  const outcome = linkTransferRows(aId, bId);
+  // An exchange into the budget's currency fixes the other side's rate (docs/multi-currency M3)
+  if (outcome.ok) convertTransactions([aId, bId]);
+  return outcome;
+}
+
+function linkTransferRows(aId: string, bId: string): TransferOutcome {
   return db.transaction((tx) => {
     const [a, b] = [aId, bId].map((id) =>
       tx.select().from(transactions).where(eq(transactions.id, id)).get(),
@@ -121,6 +130,17 @@ export function linkTransfer(aId: string, bId: string): TransferOutcome {
  * the payee the bank (or CSV) named, if it has one.
  */
 export function unlinkTransfer(id: string): TransferOutcome {
+  const otherId = db
+    .select({ other: transactions.transferTransactionId })
+    .from(transactions)
+    .where(eq(transactions.id, id))
+    .get()?.other;
+  const outcome = unlinkTransferRows(id);
+  if (outcome.ok) convertTransactions(otherId ? [id, otherId] : [id]);
+  return outcome;
+}
+
+function unlinkTransferRows(id: string): TransferOutcome {
   return db.transaction((tx) => {
     const row = tx.select().from(transactions).where(eq(transactions.id, id)).get();
     if (!row) return { ok: false, status: 404, error: 'Not found' } as const;
@@ -147,4 +167,42 @@ export function unlinkTransfer(id: string): TransferOutcome {
     }
     return { ok: true } as const;
   });
+}
+
+/**
+ * After an account moves on or off budget: transfers between it and other accounts that no longer
+ * cross the budget boundary lose their category (docs/multi-currency M8, D26), so money isn't
+ * counted twice. Returns how many transactions changed.
+ */
+export function uncategorizeTransfersThatStopCrossing(accountId: string): number {
+  const budgetStatus = new Map(
+    db
+      .select({ id: accounts.id, currency: accounts.currency, isOffBudget: accounts.isOffBudget })
+      .from(accounts)
+      .all()
+      .map((a) => [a.id, a]),
+  );
+  const other = alias(transactions, 'other');
+  const rows = db
+    .select({ id: transactions.id, self: transactions.accountId, other: other.accountId })
+    .from(transactions)
+    .innerJoin(other, eq(other.id, transactions.transferTransactionId))
+    .where(
+      and(
+        isNotNull(transactions.categoryId),
+        or(eq(transactions.accountId, accountId), eq(other.accountId, accountId)),
+      ),
+    )
+    .all();
+  const stale = rows.filter((r) => {
+    const self = budgetStatus.get(r.self);
+    const otherAccount = budgetStatus.get(r.other);
+    return !self || !otherAccount || !sideTakesCategory(self, otherAccount);
+  });
+  db.transaction((tx) => {
+    for (const r of stale) {
+      tx.update(transactions).set({ categoryId: null }).where(eq(transactions.id, r.id)).run();
+    }
+  });
+  return stale.length;
 }
