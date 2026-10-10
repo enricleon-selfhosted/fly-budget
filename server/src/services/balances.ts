@@ -17,6 +17,13 @@ export const inAccountBalance: SQL = isNull(transactions.parentTransactionId);
 export const isIncomeOrSpending: SQL = sql`not (${transactions.isAdjustment} = 1 and ${transactions.categoryId} is null)`;
 
 /**
+ * Everything except transfers that only move money between two accounts. A transfer with a
+ * category moves money into or out of the budget (it has an off-budget account on the other
+ * side, decision D26), so income and spending reports count it like any other.
+ */
+export const isNotPlainTransfer: SQL = sql`(${transactions.transferTransactionId} is null or ${transactions.categoryId} is not null)`;
+
+/**
  * Rows in accounts kept in the budget's currency. Accounts in another currency
  * (`accounts.currency` set) can't be added to them without exchange rates, so totals across
  * accounts (net worth, income and spending reports) leave them out.
