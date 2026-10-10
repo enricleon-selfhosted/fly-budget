@@ -25,6 +25,9 @@ export class ConfigurationError extends EnableBankingError {}
 /** Not set up yet, or the thing asked for doesn't exist. Its message is safe to show. */
 export class NotFoundError extends Error {}
 
+/** Can't be done in the current state (e.g. removing the setup while banks are connected). Safe to show. */
+export class ConflictError extends Error {}
+
 const SESSION_ENDED = new Set([
   'EXPIRED_SESSION',
   'CLOSED_SESSION',
@@ -77,7 +80,12 @@ export function enableBankingErrorMessage(err: unknown, fallback: string): strin
     return 'Access to this bank has ended. Renew it to keep syncing.';
   if (err instanceof RateLimitedError)
     return 'Your bank limits how often FlyBudget can read your accounts. Try again later.';
-  if (err instanceof ConfigurationError || err instanceof NotFoundError) return err.message;
+  if (
+    err instanceof ConfigurationError ||
+    err instanceof NotFoundError ||
+    err instanceof ConflictError
+  )
+    return err.message;
   if (err instanceof EnableBankingError) {
     if (err.code && SAFE_MESSAGES[err.code]) return SAFE_MESSAGES[err.code];
     if (err.status === null) return 'Could not reach Enable Banking. Try again later.';

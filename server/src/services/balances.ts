@@ -1,6 +1,6 @@
-import { and, eq, isNull, sql, type SQL } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { transactions } from '../db/schema.js';
+import { accounts, transactions } from '../db/schema.js';
 
 // A split is stored as a parent row holding the full amount plus child rows holding
 // the parts, all in the same account. Account balances count the parent only;
@@ -15,6 +15,16 @@ export const inAccountBalance: SQL = isNull(transactions.parentTransactionId);
  * Balances and net worth still count those.
  */
 export const isIncomeOrSpending: SQL = sql`not (${transactions.isAdjustment} = 1 and ${transactions.categoryId} is null)`;
+
+/**
+ * Rows in accounts kept in the budget's currency. Accounts in another currency
+ * (`accounts.currency` set) can't be added to them without exchange rates, so totals across
+ * accounts (net worth, income and spending reports) leave them out.
+ */
+export const inBudgetCurrency: SQL = inArray(
+  transactions.accountId,
+  db.select({ id: accounts.id }).from(accounts).where(isNull(accounts.currency)),
+);
 
 /** Sum of an account's transactions, as added to its starting balance. */
 export function accountTransactionSum(accountId: string): number {

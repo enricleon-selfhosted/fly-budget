@@ -18,6 +18,7 @@ import {
   scheduleOccurrences,
   schedules,
   simplefinAccountMappings,
+  enableBankingAccounts,
   transactions,
 } from '../db/schema.js';
 
@@ -145,6 +146,11 @@ export function restoreBackup(data: Record<BackupTable, Row[]>) {
     .from(simplefinAccountMappings)
     .where(isNotNull(simplefinAccountMappings.accountId))
     .all();
+  const enableBankingLinks = db
+    .select({ id: enableBankingAccounts.id, accountId: enableBankingAccounts.accountId })
+    .from(enableBankingAccounts)
+    .where(isNotNull(enableBankingAccounts.accountId))
+    .all();
   const restoredAccounts = new Set(data.accounts.map((a) => a.id as string));
 
   db.transaction((tx) => {
@@ -163,6 +169,7 @@ export function restoreBackup(data: Record<BackupTable, Row[]>) {
     for (const [table, links] of [
       [plaidAccountMappings, plaidLinks],
       [simplefinAccountMappings, simplefinLinks],
+      [enableBankingAccounts, enableBankingLinks],
     ] as const) {
       for (const link of links) {
         if (!link.accountId || !restoredAccounts.has(link.accountId)) continue;

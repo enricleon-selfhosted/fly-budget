@@ -172,6 +172,19 @@ export const bankRateLimit = rateLimit({
 });
 
 /**
+ * The bank sends the browser back to Enable Banking's consent callback, which is reachable
+ * without the usual guards (it is authenticated by its single-use state instead, see
+ * routes/enableBanking.ts). Nobody legitimately loads it more than a few times a minute.
+ */
+export const consentCallbackRateLimit = rateLimit({
+  windowMs: 60_000,
+  limit: 20,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: 'Too many requests. Wait a minute and try again.',
+});
+
+/**
  * Server mode behind a reverse proxy that FlyBudget wasn't told about: every request
  * seems to come from the proxy, so HTTPS isn't detected (cookies lose `Secure`) and new
  * browsers share one login rate limit. Says so once in the log.
