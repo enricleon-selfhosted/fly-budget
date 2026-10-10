@@ -129,6 +129,31 @@ export function useDeleteTransaction() {
   });
 }
 
+/** What "Link as transfer" offers for a transaction (loaded when `enabled`) */
+export function useTransferCandidates(id: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ['transfer-candidates', id],
+    queryFn: () => txApi.getTransferCandidates(id!),
+    enabled: enabled && !!id,
+  });
+}
+
+/** Two existing transactions become one transfer (or an exchange, across currencies) */
+export function useLinkTransfer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, otherId }: { id: string; otherId: string }) =>
+      txApi.linkTransfer(id, otherId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['transactions'] });
+      qc.invalidateQueries({ queryKey: ['accounts'] });
+      qc.invalidateQueries({ queryKey: ['payees'] });
+      qc.invalidateQueries({ queryKey: ['budget'] });
+      qc.invalidateQueries({ queryKey: ['budget-summary'] });
+    },
+  });
+}
+
 /** Turns a transfer back into two transactions; the payees and budget figures change with it */
 export function useUnlinkTransfer() {
   const qc = useQueryClient();
@@ -178,6 +203,9 @@ export function useCreateTransfer() {
               toAccountId: created[1].accountId,
               date: created[0].date,
               amount: Math.abs(created[0].amount),
+              // An exchange keeps what arrived, and a category on the budget side
+              toAmount: Math.abs(created[1].amount),
+              categoryId: created[0].categoryId ?? created[1].categoryId,
               notes: created[0].notes,
             });
           }

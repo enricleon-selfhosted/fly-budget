@@ -198,3 +198,28 @@ expired/revoked session is deleted locally.
 Turns a transfer pair back into two ordinary transactions (payee back to the bank's text,
 uncategorized). `200` with the updated row; `400` if it isn't a transfer; `403` if either side is
 reconciled.
+
+### `POST /api/transactions/transfer` (extended, D25, D26)
+
+Adds `toAmount` (required when the accounts' currencies differ: what arrived) and `categoryId`
+(only for the on-budget side of a transfer with an off-budget account; `400` otherwise).
+
+### `POST /api/transactions/:id/link-transfer`
+
+`{ "otherId": "…" }` → `200` with the updated row. Same rules as bank sync's linking: different
+accounts, opposite directions, one amount within one currency.
+
+### `GET /api/transactions/:id/transfer-candidates`
+
+Up to 20 transactions in the user's other open accounts within 7 days that could be the other
+side: `[{ id, accountId, accountName, currency, date, amount, payeeName }]`, closest date first.
+
+### `GET /api/transactions` (extended)
+
+Transfer rows also carry `transferAccountId` and `transferAmount` (the other side's account and
+amount; they differ from this side's in an exchange).
+
+### Schedules (extended, D28)
+
+`matchText` (string up to 200 characters, or null) on create and update: bank text that recognizes
+the item's transactions.

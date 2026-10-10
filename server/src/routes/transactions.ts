@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db } from '../db/index.js';
 import { transactions, payees, accounts, categories } from '../db/schema.js';
-import { eq, and, or, like, gte, lte, sql, isNull, inArray } from 'drizzle-orm';
+import { eq, and, or, like, gte, lte, sql, isNull, inArray, ne } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import {
@@ -10,7 +10,16 @@ import {
   resolvePayee,
   unlinkTransfer,
 } from '../services/transactionHelpers.js';
-import { mirrorsAmount, sameCurrency, sideTakesCategory } from '../utils/transferRules.js';
+import {
+  mirrorsAmount,
+  sameCurrency,
+  sideTakesCategory,
+  transferPairProblem,
+} from '../utils/transferRules.js';
+import { addDays, format, parseISO } from 'date-fns';
+
+/** "Link as transfer" looks this many days either side for the other side */
+const TRANSFER_CANDIDATE_DAYS = 7;
 import { buildRuleContext, insertNewTransaction, loadRules } from '../services/ruleService.js';
 import { isoDate } from '../utils/validation.js';
 
@@ -162,10 +171,32 @@ transactionsRouter.get('/', (req, res) => {
     }
   }
 
-  const result = rows.map((r) => ({
-    ...r,
-    ...(r.isParent === 1 ? { children: childrenMap.get(r.id) ?? [] } : {}),
-  }));
+  // A transfer's other side: its account (is it on budget? which currency?) and amount, which
+  // differs from this side's in an exchange
+  const otherIds = rows.map((r) => r.transferTransactionId).filter((v): v is string => !!v);
+  const others = new Map(
+    otherIds.length
+      ? db
+          .select({
+            id: transactions.id,
+            accountId: transactions.accountId,
+            amount: transactions.amount,
+          })
+          .from(transactions)
+          .where(inArray(transactions.id, otherIds))
+          .all()
+          .map((o) => [o.id, o])
+      : [],
+  );
+
+  const result = rows.map((r) => {
+    const other = r.transferTransactionId ? others.get(r.transferTransactionId) : undefined;
+    return {
+      ...r,
+      ...(r.isParent === 1 ? { children: childrenMap.get(r.id) ?? [] } : {}),
+      ...(other ? { transferAccountId: other.accountId, transferAmount: other.amount } : {}),
+    };
+  });
 
   res.json(result);
 });
@@ -525,6 +556,65 @@ transactionsRouter.put('/:id', (req, res) => {
   });
   const updated = db.select().from(transactions).where(eq(transactions.id, req.params.id)).get();
   res.json(updated);
+});
+
+// GET /transactions/:id/transfer-candidates — what "Link as transfer" offers: transactions in
+// the user's other open accounts that could be this one's other side (D25), closest date first
+transactionsRouter.get('/:id/transfer-candidates', (req, res) => {
+  const row = db.select().from(transactions).where(eq(transactions.id, req.params.id)).get();
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  const self = db
+    .select({ id: accounts.id, currency: accounts.currency, isOffBudget: accounts.isOffBudget })
+    .from(accounts)
+    .where(eq(accounts.id, row.accountId))
+    .get();
+  if (!self || row.amount === 0) return res.json([]);
+
+  const shift = (days: number) => format(addDays(parseISO(row.date), days), 'yyyy-MM-dd');
+  const nearby = db
+    .select({
+      id: transactions.id,
+      accountId: transactions.accountId,
+      accountName: accounts.name,
+      currency: accounts.currency,
+      isOffBudget: accounts.isOffBudget,
+      date: transactions.date,
+      amount: transactions.amount,
+      payeeName: transactions.payeeName,
+    })
+    .from(transactions)
+    .innerJoin(accounts, eq(accounts.id, transactions.accountId))
+    .where(
+      and(
+        ne(transactions.accountId, row.accountId),
+        isNull(accounts.closedAt),
+        isNull(transactions.transferTransactionId),
+        isNull(transactions.parentTransactionId),
+        eq(transactions.isParent, 0),
+        eq(transactions.isAdjustment, 0),
+        eq(transactions.reconciled, 0),
+        gte(transactions.date, shift(-TRANSFER_CANDIDATE_DAYS)),
+        lte(transactions.date, shift(TRANSFER_CANDIDATE_DAYS)),
+      ),
+    )
+    .all();
+
+  const days = (d: string) => Math.abs(Date.parse(d) - Date.parse(row.date)) / 864e5;
+  const candidates = nearby
+    .filter(
+      (c) =>
+        transferPairProblem(
+          { amount: row.amount, account: self },
+          {
+            amount: c.amount,
+            account: { id: c.accountId, currency: c.currency, isOffBudget: c.isOffBudget },
+          },
+        ) === null,
+    )
+    .sort((a, b) => days(a.date) - days(b.date) || a.id.localeCompare(b.id))
+    .slice(0, 20)
+    .map(({ isOffBudget: _, ...c }) => c);
+  res.json(candidates);
 });
 
 // POST /transactions/:id/link-transfer — two existing transactions become one transfer (or an

@@ -26,6 +26,8 @@ export interface CreateScheduleData {
   categoryId?: string | null;
   payeeId?: string | null;
   notes?: string | null;
+  /** Bank text that recognizes this item's transactions */
+  matchText?: string | null;
   status?: string;
   autoCreate?: number;
 }

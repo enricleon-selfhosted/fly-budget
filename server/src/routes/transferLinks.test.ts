@@ -275,3 +275,44 @@ describe('exchanges and transfers across the budget boundary', () => {
     );
   });
 });
+
+describe('what the app needs to show and link transfers', () => {
+  it('each transfer row says which account and amount its other side has', async () => {
+    const { body: gbp } = await send('POST', '/accounts', {
+      name: 'GBP wallet',
+      type: 'checking',
+      currency: 'GBP',
+    });
+    const { body: eur } = await send('POST', '/accounts', { name: 'EUR wallet', type: 'checking' });
+    const { body: pair } = await send('POST', '/transactions/transfer', {
+      fromAccountId: gbp.id,
+      toAccountId: eur.id,
+      date: '2096-05-02',
+      amount: 10_000,
+      toAmount: 11_620,
+    });
+    const { body: list } = await send('GET', `/transactions?account_id=${eur.id}`);
+    expect(list.find((t: { id: string }) => t.id === pair[1].id)).toMatchObject({
+      transferAccountId: gbp.id,
+      transferAmount: -10_000,
+    });
+  });
+
+  it('offers as the other side only what could be: opposite direction, nearby, same amount within one currency', async () => {
+    const { checking, savings } = await twoAccounts();
+    const { body: gbp } = await send('POST', '/accounts', {
+      name: 'GBP spare',
+      type: 'checking',
+      currency: 'GBP',
+    });
+    const out = imported(checking.id, -5_000, 'TRANSFER');
+    const exact = imported(savings.id, 5_000, 'FROM CHECKING');
+    imported(savings.id, 4_999, 'NEARLY');
+    imported(savings.id, -5_000, 'SAME DIRECTION');
+    const exchange = imported(gbp.id, 4_310, 'FROM EUR');
+
+    const { body } = await send('GET', `/transactions/${out}/transfer-candidates`);
+    expect(body.map((c: { id: string }) => c.id).sort()).toEqual([exact, exchange].sort());
+    expect(body.find((c: { id: string }) => c.id === exchange)).toMatchObject({ currency: 'GBP' });
+  });
+});
