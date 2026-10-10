@@ -116,7 +116,7 @@ function ConnectedAccountsSettings() {
               : 'text-text-tertiary hover:text-text-secondary ring-0 ring-transparent'
           }`}
         >
-          Enable Banking (Europe)
+          Enable Banking<span className="max-md:hidden">&nbsp;(Europe)</span>
           {ebConnections.length > 0 && (
             <span className="ml-1.5 text-[10px] bg-brand-50 text-brand-600 px-1.5 py-0.5 rounded-full">
               {ebConnections.length}

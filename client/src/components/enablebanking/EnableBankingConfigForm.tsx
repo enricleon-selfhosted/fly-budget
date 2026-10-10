@@ -138,7 +138,7 @@ export function EnableBankingConfigForm({ status, onDone, onCancel }: Props) {
                 <>
                   <span className="block">
                     FlyBudget isn&apos;t reachable over https here, and Enable Banking only accepts
-                    https redirect URLs. Add any https address you control, for example:
+                    https redirect URLs. Add any https address, for example:
                   </span>
                   <CopyAddress address={EXAMPLE_REDIRECT_URL} />
                   <span className="block">

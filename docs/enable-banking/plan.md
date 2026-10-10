@@ -51,11 +51,11 @@ Status: ☐ to do · ◐ in progress · ☑ done · ⏸ deferred. Owner: **lead*
 | #   | Task                                                                                                  | Owner | Status |
 | --- | ----------------------------------------------------------------------------------------------------- | ----- | ------ |
 | 4.1 | Types, `api/enableBanking.ts`, `hooks/useEnableBanking.ts` (+ consent polling hook)                   | lead  | ☑      |
-| 4.2 | Settings → Connected Banks: provider tab, config form, connection card                                | agent | ◐      |
-| 4.3 | Connect modal: country → bank → consent (paste fallback) → mapping → sync → summary                   | agent | ◐      |
+| 4.2 | Settings → Connected Banks: provider tab, config form, connection card                                | agent | ☑      |
+| 4.3 | Connect modal: country → bank → consent (paste fallback) → mapping → sync → summary                   | agent | ☑      |
 | 4.4 | Currency: `currencyCode` preference, `formatCurrency(cents, currency)`, account views, account modals | agent | ☑      |
 | 4.5 | "Unlink transfer" in the transaction detail panel                                                     | agent | ☑      |
-| 4.6 | Demo: `NotInDemo` wording, `ConnectedAccountsDemo`                                                    | agent | ◐      |
+| 4.6 | Demo: `NotInDemo` wording, `ConnectedAccountsDemo`                                                    | agent | ☑      |
 
 ## Phase 5 — Docs and checks
 
@@ -63,10 +63,10 @@ Status: ☐ to do · ◐ in progress · ☑ done · ⏸ deferred. Owner: **lead*
 | --- | ----------------------------------------------------------------------------------------- | ----- | ------ |
 | 5.1 | `website/docs/bank-sync.mdx` (setup guide), `settings.mdx`, `privacy.mdx`, `security.mdx` | agent | ☑      |
 | 5.2 | `SECURITY.md`, `CLAUDE.md` + `AGENTS.md`                                                  | lead  | ☑      |
-| 5.3 | Typecheck, tests, Prettier, client build                                                  | lead  | ☐      |
-| 5.4 | e2e: Settings shows the Enable Banking tab without page errors                            | lead  | ☐      |
+| 5.3 | Typecheck, tests, Prettier, client build                                                  | lead  | ☑      |
+| 5.4 | e2e: Settings shows the Enable Banking tab without page errors                            | lead  | ☑      |
 
-| 5.5 | Account amounts in their currency in the remaining places (add transaction, reconcile, update value, account reorder); stale provider mentions in the website | agent | ◐ |
+| 5.5 | Account amounts in their currency in the remaining places (add transaction, reconcile, update value, account reorder); stale provider mentions in the website | agent | ☑ |
 
 ## Later (not in this branch)
 

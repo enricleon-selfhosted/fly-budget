@@ -65,7 +65,10 @@ export function EnableBankingConnectionCard({ connection }: Props) {
   const renewNeeded = connection.syncStatus === 'reauth_required' || expired || expiresSoon;
   const isSyncing = sync.isPending || connection.syncStatus === 'syncing';
   const initial = connection.aspspName.charAt(0).toUpperCase();
-  const status = STATUS_LABEL[connection.syncStatus];
+  const status =
+    connection.syncStatus === 'good' && !connection.lastSyncedAt
+      ? { label: 'Connected', dot: 'bg-positive' }
+      : STATUS_LABEL[connection.syncStatus];
 
   const syncedText = connection.lastSyncedAt
     ? `Last synced ${formatDistanceToNow(new Date(connection.lastSyncedAt), { addSuffix: true })}`

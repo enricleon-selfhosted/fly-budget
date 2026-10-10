@@ -18,7 +18,9 @@ then stay as the design record.
 
 ## Status
 
-See [plan.md](plan.md). Branch: `feat/enable-banking`.
+Implemented on `feat/enable-banking`; every task in [plan.md](plan.md) is done, with follow-ups
+listed under "Later". Not yet exercised against the real Enable Banking API with a live bank
+account (see the last entry in [log.md](log.md)).
 
 ## Scope in one paragraph
 
