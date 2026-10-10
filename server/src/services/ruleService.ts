@@ -15,7 +15,7 @@ import {
   type TxState,
 } from './rulesEngine.js';
 import { resolvePayee } from './transactionHelpers.js';
-import { convertTransactions, foreignCurrencies } from './fx/fxService.js';
+import { convertTransactions, waitsForRate } from './fx/fxService.js';
 import { scheduleRatesDownload } from './fx/download.js';
 
 type RuleRow = typeof rules.$inferSelect;
@@ -91,10 +91,10 @@ type InsertOptions = {
  */
 export function insertNewTransaction(input: NewTransactionInput, opts: InsertOptions = {}) {
   const result = input.isAdjustment ? insertAdjustment(input) : insertWithRules(input, opts);
-  // In an account in another currency: its rate to the budget's (docs/multi-currency M3)
-  if (convertTransactions([result.transaction.id]) === 0 && foreignCurrencies().size) {
-    scheduleRatesDownload();
-  }
+  // In an account in another currency: its rate to the budget's (docs/multi-currency M3), and
+  // when there's none for its day yet, a download if the user allows it
+  convertTransactions([result.transaction.id]);
+  if (waitsForRate(result.transaction.id)) scheduleRatesDownload();
   return result;
 }
 

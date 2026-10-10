@@ -194,6 +194,17 @@ export function convertTransactions(ids: readonly string[]): number {
   return refreshFx({ transactionIds: [...ids] });
 }
 
+/** Whether a transaction is in an account in another currency and has no rate yet */
+export function waitsForRate(id: string): boolean {
+  const row = db
+    .select({ fxRate: transactions.fxRate, currency: accounts.currency })
+    .from(transactions)
+    .innerJoin(accounts, eq(accounts.id, transactions.accountId))
+    .where(eq(transactions.id, id))
+    .get();
+  return !!row?.currency && row.fxRate === null;
+}
+
 export type FxOutcome = { ok: true } | { ok: false; status: number; error: string };
 
 /**
