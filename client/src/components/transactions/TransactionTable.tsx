@@ -195,19 +195,26 @@ export function TransactionTable({
     return result;
   }, [transactions, accountInfoMap]);
 
-  function handleCreate(data: CreateTransactionData) {
+  // `toAmount`: the other account's amount when the transfer crosses currencies (D25)
+  function handleCreate(data: CreateTransactionData, toAmount?: number) {
     if (data.categoryId?.startsWith('transfer:') && accountId) {
-      const toAccountId = data.categoryId.slice('transfer:'.length);
+      const otherId = data.categoryId.slice('transfer:'.length);
+      const sent = Math.abs(data.amount);
+      // The server takes `amount` on the sending side and `toAmount` on the receiving side.
+      // An outflow leaves this account; an inflow comes from the other account into this one.
+      const sides =
+        data.amount > 0
+          ? {
+              fromAccountId: otherId,
+              toAccountId: accountId,
+              amount: toAmount ?? sent,
+              toAmount: toAmount === undefined ? undefined : sent,
+            }
+          : { fromAccountId: accountId, toAccountId: otherId, amount: sent, toAmount };
       newTx.add(
         {
           kind: 'transfer',
-          data: {
-            fromAccountId: accountId,
-            toAccountId,
-            date: data.date,
-            amount: Math.abs(data.amount),
-            notes: data.notes,
-          },
+          data: { ...sides, date: data.date, notes: data.notes },
         },
         () => setShowAdd(false),
       );

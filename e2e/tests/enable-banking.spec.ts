@@ -67,6 +67,73 @@ test.describe('accounts in another currency', () => {
     const pair = await api.call('POST', '/transactions/transfer', { ...exchange, toAmount: 940 });
     expect(pair.map((t: { amount: number }) => t.amount)).toEqual([-1_000, 940]);
   });
+
+  test('an exchange entered in the register keeps the amount received', async ({ page, api }) => {
+    const everyday = await api.createAccount('Everyday', 100_000);
+    const francs = await api.createAccount('Franc pocket', 0, 'checking', { currency: 'CHF' });
+    await open(page, `/accounts/${everyday.id}`);
+
+    await page.getByRole('button', { name: 'Add Transaction' }).click();
+    const form = page.getByRole('form', { name: 'New transaction' });
+    await form
+      .getByRole('combobox', { name: 'Category' })
+      .selectOption({ label: 'Transfer: Franc pocket' });
+    await form.getByRole('spinbutton', { name: 'Outflow' }).fill('10.00');
+    // Across currencies the amount received is needed: there is no rate to work it out
+    const save = form.getByRole('button', { name: 'Save' });
+    await expect(save).toBeDisabled();
+    await form.getByRole('spinbutton', { name: 'Received (CHF)' }).fill('9.40');
+    await save.click();
+
+    await expect
+      .poll(async () => (await api.transactions(`?account_id=${francs.id}`)).map((t) => t.amount))
+      .toEqual([940]);
+    expect((await api.transactions(`?account_id=${everyday.id}`)).map((t) => t.amount)).toEqual([
+      -1_000,
+    ]);
+
+    await page.getByText('Transfer: Franc pocket').click();
+    const panel = page.getByRole('complementary', { name: 'Transaction details' });
+    await expect(panel).toContainText('1 USD = 0.9400 CHF');
+  });
+});
+
+test('two transactions can be linked into a transfer by hand', async ({ page, api }) => {
+  const checking = await api.createAccount('Checking', 50_000);
+  const savings = await api.createAccount('Savings', 0, 'savings');
+  const date = new Date().toISOString().slice(0, 10);
+  const out = await api.createTransaction({
+    accountId: checking.id,
+    date,
+    amount: -2_500,
+    payeeName: 'Move to savings',
+  });
+  const into = await api.createTransaction({
+    accountId: savings.id,
+    date,
+    amount: 2_500,
+    payeeName: 'From checking',
+  });
+
+  await open(page, `/accounts/${checking.id}`);
+  await page.getByTestId('transaction-row').filter({ hasText: 'Move to savings' }).focus();
+  await page.keyboard.press('Enter');
+  const panel = page.getByRole('complementary', { name: 'Transaction details' });
+  await panel.getByRole('button', { name: 'Link as transfer' }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'Link as transfer' });
+  await dialog
+    .getByRole('list', { name: 'Matching transactions' })
+    .getByRole('button', { name: /From checking/ })
+    .click();
+
+  await expect(dialog).toBeHidden();
+  await expect
+    .poll(
+      async () => (await api.transactions()).find((t) => t.id === out.id)?.transferTransactionId,
+    )
+    .toBe(into.id);
+  await expect(panel.getByRole('button', { name: 'Unlink transfer' })).toBeVisible();
 });
 
 test('a transfer can be turned back into two transactions', async ({ page, api }) => {
