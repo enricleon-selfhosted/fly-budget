@@ -67,6 +67,7 @@ export function useCreateSchedule() {
             categoryId: created.categoryId,
             payeeId: created.payeeId,
             notes: created.notes,
+            matchText: created.matchText,
             autoCreate: created.autoCreate,
           });
           invalidateAll(qc);
@@ -107,6 +108,7 @@ export function useUpdateSchedule() {
             categoryId: snapshot.categoryId,
             payeeId: snapshot.payeeId,
             notes: snapshot.notes,
+            matchText: snapshot.matchText,
             autoCreate: snapshot.autoCreate,
             status: snapshot.status,
           });

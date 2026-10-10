@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { format, startOfMonth, endOfMonth, addMonths, subMonths, parseISO } from 'date-fns';
 import {
   ChevronLeft,
@@ -19,11 +19,19 @@ import {
 } from '../../hooks/useSchedules';
 import { useAccounts } from '../../hooks/useAccounts';
 import { formatCurrency } from '../../utils/currency';
+import { useBudgetCurrency } from '../../utils/budgetCurrency';
 import { Button } from '../ui/Button';
 import { EmptyState } from '../ui/EmptyState';
 import { docsUrl } from '../../utils/project';
 import { usePreferencesStore } from '../../store/preferencesStore';
-import { getUpcomingDays } from './scheduleFormat';
+import {
+  NO_ACCOUNTS,
+  accountCurrencyLookup,
+  describeCurrencyTotals,
+  getUpcomingDays,
+  summarizeByCurrency,
+  type CurrencySummary,
+} from './scheduleFormat';
 import type { Schedule, ScheduleOccurrence } from '../../types';
 
 interface Props {
@@ -36,35 +44,18 @@ interface Props {
 
 type View = 'list' | 'calendar';
 
-interface Totals {
-  total: number;
-  paid: number;
-  remaining: number;
-}
-
-/** Paid uses the actual matched amount; remaining uses the expected amount of unpaid items. */
-function computeTotals(occs: ScheduleOccurrence[]): Totals {
-  let paid = 0,
-    remaining = 0;
-  for (const o of occs) {
-    if (o.displayStatus === 'skipped' || o.displayStatus === 'cancelled') continue;
-    if (o.displayStatus === 'paid') paid += Math.abs(o.matchedAmount ?? o.expectedAmount);
-    else remaining += Math.abs(o.expectedAmount);
-  }
-  return { total: paid + remaining, paid, remaining };
-}
-
 function SummaryColumn({
   label,
   verb,
-  totals,
+  summary,
   barClass,
 }: {
   label: string;
   verb: string;
-  totals: Totals;
+  summary: CurrencySummary;
   barClass: string;
 }) {
+  const { totals, others } = summary;
   const pct = totals.total > 0 ? Math.min(100, (totals.paid / totals.total) * 100) : 0;
   return (
     <div className="flex-1 px-5 py-4 min-w-0">
@@ -85,6 +76,12 @@ function SummaryColumn({
       ) : (
         <p className="text-sm text-text-tertiary mt-1">None this month</p>
       )}
+      {/* Items in other currencies are not added into the figures above: one line each */}
+      {others.map((o) => (
+        <p key={o.currency} className="text-xs text-text-tertiary tabular-nums mt-1.5">
+          {describeCurrencyTotals(o.currency, o.totals, verb)}
+        </p>
+      ))}
     </div>
   );
 }
@@ -106,12 +103,14 @@ export default function MonthlyTab({
   const to = format(endOfMonth(monthDate), 'yyyy-MM-dd');
 
   const { data: occurrences = [], isLoading } = useScheduleOccurrences(from, to);
-  const { data: accounts = [] } = useAccounts();
+  const { data: accounts = NO_ACCOUNTS } = useAccounts();
+  const budget = useBudgetCurrency();
   const markPaid = useMarkOccurrencePaid();
   const skipOcc = useSkipOccurrence();
   const unmatchOcc = useUnmatchOccurrence();
 
   const accountMap = useMemo(() => new Map(accounts.map((a) => [a.id, a.name])), [accounts]);
+  const currencyOf = useMemo(() => accountCurrencyLookup(accounts), [accounts]);
   const recMap = useMemo(() => new Map(allRecurring.map((r) => [r.id, r])), [allRecurring]);
 
   const { income, expenses } = useMemo(() => {
@@ -122,8 +121,19 @@ export default function MonthlyTab({
     };
   }, [occurrences]);
 
-  const incomeTotals = useMemo(() => computeTotals(income), [income]);
-  const expenseTotals = useMemo(() => computeTotals(expenses), [expenses]);
+  // An item's amounts are in its account's currency; only the budget's are added into the totals
+  const itemCurrency = useCallback(
+    (occ: ScheduleOccurrence) => currencyOf(occ.scheduleAccountId) ?? budget,
+    [currencyOf, budget],
+  );
+  const incomeSummary = useMemo(
+    () => summarizeByCurrency(income, itemCurrency, budget),
+    [income, itemCurrency, budget],
+  );
+  const expenseSummary = useMemo(
+    () => summarizeByCurrency(expenses, itemCurrency, budget),
+    [expenses, itemCurrency, budget],
+  );
 
   // After a calendar day click, scroll the list to that day's first row
   useEffect(() => {
@@ -160,6 +170,7 @@ export default function MonthlyTab({
             upcomingDays={upcomingDays}
             highlighted={highlightDate === occ.expectedDate}
             accountName={occ.scheduleAccountId ? accountMap.get(occ.scheduleAccountId) : undefined}
+            currency={currencyOf(occ.scheduleAccountId)}
             onMarkPaid={() =>
               markPaid.mutate({
                 scheduleId: occ.scheduleId,
@@ -242,13 +253,13 @@ export default function MonthlyTab({
           <SummaryColumn
             label="Income"
             verb="received"
-            totals={incomeTotals}
+            summary={incomeSummary}
             barClass="bg-positive"
           />
           <SummaryColumn
             label="Expenses"
             verb="paid"
-            totals={expenseTotals}
+            summary={expenseSummary}
             barClass="bg-negative"
           />
         </div>

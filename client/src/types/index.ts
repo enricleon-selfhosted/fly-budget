@@ -651,6 +651,8 @@ export interface MatchSuggestion {
   expectedAmount: number;
   candidates: {
     transactionId: string;
+    /** Amounts are in this account's currency */
+    accountId: string;
     date: string;
     amount: number;
     payeeName: string | null;

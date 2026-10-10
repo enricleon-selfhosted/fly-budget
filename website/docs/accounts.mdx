@@ -55,6 +55,9 @@ Money in **on-budget** accounts is money you plan with: its income counts toward
 their transactions stay out of the budget. Change it for any account with the **Off budget**
 box in its **Edit** dialog. Accounts in another currency are always off budget.
 
+Money can still move between the two. A [transfer](./transactions#transfers) between an on-budget
+account and an off-budget one counts in your budget when its on-budget side has a category.
+
 ## Accounts in another currency
 
 Most accounts are in your budget's currency and don't need anything set. For an account in a
@@ -63,12 +66,38 @@ budget's currency is set in [Settings → Preferences](./settings#preferences).
 
 FlyBudget doesn't convert currencies, so these accounts are kept apart from the rest:
 
-- They're always off budget, so their transactions stay out of your budget.
+- They're always off budget, so their transactions stay out of your budget, except for transfers
+  whose budget side has a category (see [Transfers](./transactions#transfers)).
 - Their balances are left out of your net worth totals. They're shown on their own, in their own
   currency.
-- Bank sync only links a bank account to an account in the same currency.
+- Bank sync only links a bank account to an existing account in the same currency. Money that
+  moves between accounts in different currencies is an [exchange](./transactions#exchanges), a
+  kind of transfer.
 
 FlyBudget never adds up amounts in different currencies, because it has no exchange rates.
+
+## Income in another currency
+
+Say you're paid every week in pounds (GBP) into a GBP account at Revolut, and your budget is in
+euros (EUR). The GBP account is off budget, so the pay doesn't count toward
+[To Be Budgeted](./budgeting#to-be-budgeted) when it arrives. It counts once it reaches your euro
+account:
+
+1. Add the Revolut account in GBP, with its currency set to GBP.
+2. When you change pounds into euros in Revolut, that's an exchange. FlyBudget records it as a
+   transfer between the two accounts: the GBP side keeps the pounds that left, and the euro side
+   keeps the euros that arrived. The rate is the one implied by those two amounts.
+3. Give the euro side an income category, such as **Salary**. The euros now count toward To Be
+   Budgeted, exactly what you received. To do this automatically, add a [rule](./rules) that sets
+   the category when the bank's original text contains `Exchanged from GBP`.
+
+If both accounts come from the same bank connection, FlyBudget can recognize the exchange from the
+bank's text. Otherwise, link the two sides yourself with **Link as transfer** (see
+[Linking by hand](./transactions#linking-by-hand)).
+
+The budget only sees money once it has arrived in euros. Spending paid straight from the GBP account
+isn't in your budget, because the budget doesn't convert pounds. To keep track of the weekly pay
+itself, add it as a [recurring transaction](./recurring#pay-in-another-currency) in the GBP account.
 
 ## An account's register
 

@@ -76,9 +76,9 @@ Status: ☐ to do · ◐ in progress · ☑ done · ⏸ deferred. Owner: **lead*
 | 6.3 | `POST /transactions/:id/link-transfer` (link two existing transactions by hand)                       | lead  | ☑      |
 | 6.4 | Exchange detection in bank imports (pure matcher + core pass)                                         | lead  | ☑      |
 | 6.5 | Recurring: `match_text` (migration `0022`), concept scoring, variable amounts, auto-match on import   | lead  | ☑      |
-| 6.6 | Client: exchange amounts in transfer forms, category on boundary transfers, "Link as transfer" picker | agent | ☐      |
-| 6.7 | Client: recurring amounts in the account's currency, per-currency totals, "bank text contains" field  | agent | ☐      |
-| 6.8 | Guide: income in another currency (Revolut walkthrough), transfers, recurring; tracking docs          | agent | ☐      |
+| 6.6 | Client: exchange amounts in transfer forms, category on boundary transfers, "Link as transfer" picker | agent | ◐      |
+| 6.7 | Client: recurring amounts in the account's currency, per-currency totals, "bank text contains" field  | agent | ☑      |
+| 6.8 | Guide: income in another currency (Revolut walkthrough), transfers, recurring; tracking docs          | agent | ☑      |
 | 6.9 | Tests and e2e                                                                                         | lead  | ☐      |
 
 ## Later (not in this branch)

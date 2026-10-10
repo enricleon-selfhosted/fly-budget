@@ -241,6 +241,45 @@ describe('describeSync', () => {
       '2 transfers linked between your accounts',
     ]);
   });
+
+  it('says how many transactions were matched to recurring items', () => {
+    expect(describeSync({ added: 2, matched: 0, transfers: 0, recurring: 1 })).toEqual([
+      '2 new transactions imported',
+      '1 transaction matched to a recurring item',
+    ]);
+    expect(describeSync({ added: 2, matched: 1, transfers: 0, recurring: 3 })).toEqual([
+      '2 new transactions imported',
+      '1 transaction matched to ones you entered',
+      '3 transactions matched to recurring items',
+    ]);
+  });
+
+  it('leaves the recurring line out when there are none, or the result predates it', () => {
+    expect(describeSync({ added: 2, matched: 0, transfers: 0, recurring: 0 })).toEqual([
+      '2 new transactions imported',
+    ]);
+    expect(describeSync({ added: 2, matched: 0, transfers: 0 })).toEqual([
+      '2 new transactions imported',
+    ]);
+  });
+
+  it('gives one recurring line for any count, in the same place', () => {
+    fc.assert(
+      fc.property(
+        fc.nat({ max: 1000 }),
+        fc.nat({ max: 1000 }),
+        fc.nat({ max: 1000 }),
+        (added, matched, recurring) => {
+          const lines = describeSync({ added, matched, transfers: 0, recurring });
+          const found = lines.filter((line) => line.includes('recurring'));
+          expect(found).toHaveLength(recurring > 0 ? 1 : 0);
+          if (recurring > 0) {
+            expect(found[0].startsWith(`${recurring} transaction`)).toBe(true);
+          }
+        },
+      ),
+    );
+  });
 });
 
 describe('psuOptions', () => {

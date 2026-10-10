@@ -99,6 +99,8 @@ export interface MatchSuggestion {
   expectedAmount: number;
   candidates: {
     transactionId: string;
+    /** Amounts are in this account's currency */
+    accountId: string;
     date: string;
     amount: number;
     payeeName: string | null;
@@ -171,6 +173,7 @@ export function getMatchSuggestions(): MatchSuggestion[] {
       if (score >= 40) {
         candidateTxns.push({
           transactionId: tx.id,
+          accountId: tx.accountId,
           date: tx.date,
           amount: tx.amount,
           payeeName: tx.payeeName,

@@ -16,6 +16,8 @@ import RowMenu, { type RowMenuItem } from '../ui/RowMenu';
 import { useIsPhone } from '../../hooks/useIsPhone';
 import {
   FREQ_LABEL,
+  NO_ACCOUNTS,
+  accountCurrencyLookup,
   formatScheduleAmount,
   getUpcomingDays,
   occurrenceBadgeStatus,
@@ -42,6 +44,8 @@ interface Row {
   schedule: Schedule;
   payeeName: string;
   accountName: string;
+  /** The account's own currency (null = the budget's), for formatting the amount */
+  currency: string | null;
   nextOcc: ScheduleOccurrence | null; // next unpaid occurrence, for actions
   nextDate: string | null;
   status: RecurringBadgeStatus;
@@ -88,7 +92,7 @@ export default function AllTab({
   const [showCanceled, setShowCanceled] = useState(false);
   const [confirm, setConfirm] = useState<{ schedule: Schedule; hard: boolean } | null>(null);
 
-  const { data: accounts = [] } = useAccounts();
+  const { data: accounts = NO_ACCOUNTS } = useAccounts();
   const { data: payees = [] } = usePayees();
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
@@ -103,6 +107,7 @@ export default function AllTab({
 
   const rows = useMemo((): Row[] => {
     const accountMap = new Map(accounts.map((a) => [a.id, a.name]));
+    const currencyOf = accountCurrencyLookup(accounts);
     const payeeMap = new Map(payees.map((p) => [p.id, p.name]));
     const occsBySchedule = new Map<string, ScheduleOccurrence[]>();
     for (const o of [...occurrences].sort((a, b) => a.expectedDate.localeCompare(b.expectedDate))) {
@@ -115,6 +120,7 @@ export default function AllTab({
         schedule: s,
         payeeName: s.payeeId ? (payeeMap.get(s.payeeId) ?? '') : '',
         accountName: s.accountId ? (accountMap.get(s.accountId) ?? '') : '',
+        currency: currencyOf(s.accountId),
         ...deriveRow(s, occsBySchedule.get(s.id) ?? [], upcomingDays),
       }))
       .sort((a, b) => (a.nextDate ?? '9999').localeCompare(b.nextDate ?? '9999'));
@@ -129,7 +135,7 @@ export default function AllTab({
         r.schedule.name,
         r.payeeName,
         r.accountName,
-        formatScheduleAmount(r.schedule.amount, r.schedule.amountType),
+        formatScheduleAmount(r.schedule.amount, r.schedule.amountType, r.currency),
         statusLabel(r.status),
         r.nextDate ? format(parseISO(r.nextDate), 'MMM d, yyyy') : '',
         FREQ_LABEL.get(r.schedule.recurrenceType) ?? '',
@@ -193,7 +199,7 @@ export default function AllTab({
           muted ? 'text-text-tertiary' : s.amount > 0 ? 'text-positive' : 'text-text'
         }`}
       >
-        {formatScheduleAmount(s.amount, s.amountType)}
+        {formatScheduleAmount(s.amount, s.amountType, r.currency)}
       </span>
     );
     const nextDate = r.nextDate ? format(parseISO(r.nextDate), 'MMM d, yyyy') : '—';
