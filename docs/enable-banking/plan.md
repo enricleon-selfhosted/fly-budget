@@ -8,10 +8,10 @@ Status: ☐ to do · ◐ in progress · ☑ done · ⏸ deferred. Owner: **lead*
 | #   | Task                                                                                 | Owner | Status |
 | --- | ------------------------------------------------------------------------------------ | ----- | ------ |
 | 0.1 | Tracking docs (`docs/enable-banking/`)                                               | lead  | ☑      |
-| 0.2 | `utils/money.ts`: exact decimal → hundredths, shared; SimpleFIN uses it              | lead  | ☐      |
-| 0.3 | Migration `0021_enable_banking` + schema (+ drizzle snapshot)                        | lead  | ☐      |
-| 0.4 | `accounts.currency` in the accounts API (create/update/list)                         | lead  | ☐      |
-| 0.5 | `linkTransfer` / `unlinkTransfer` helpers + `POST /transactions/:id/unlink-transfer` | lead  | ☐      |
+| 0.2 | `utils/money.ts`: exact decimal → hundredths, shared; SimpleFIN uses it              | lead  | ☑      |
+| 0.3 | Migration `0021_enable_banking` + schema (+ drizzle snapshot)                        | lead  | ☑      |
+| 0.4 | `accounts.currency` in the accounts API (create/update/list)                         | lead  | ☑      |
+| 0.5 | `linkTransfer` / `unlinkTransfer` helpers + `POST /transactions/:id/unlink-transfer` | lead  | ☑      |
 
 ## Phase 1 — Bank-sync core (`services/bankSync/`)
 
