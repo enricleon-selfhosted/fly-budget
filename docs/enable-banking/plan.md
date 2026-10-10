@@ -17,10 +17,10 @@ Status: ☐ to do · ◐ in progress · ☑ done · ⏸ deferred. Owner: **lead*
 
 | #   | Task                                                        | Owner | Status |
 | --- | ----------------------------------------------------------- | ----- | ------ |
-| 1.1 | `types.ts` (normalized types, `BankDataSource`)             | lead  | ☐      |
-| 1.2 | `matching.ts` pure decisions + property tests               | lead  | ☐      |
-| 1.3 | `importStore.ts` (interface + SQLite)                       | lead  | ☐      |
-| 1.4 | `importTransactions.ts` + tests through its public function | lead  | ☐      |
+| 1.1 | `types.ts` (normalized types, `BankDataSource`)             | lead  | ☑      |
+| 1.2 | `matching.ts` pure decisions + property tests               | lead  | ☑      |
+| 1.3 | `importStore.ts` (interface + SQLite)                       | lead  | ☑      |
+| 1.4 | `importTransactions.ts` + tests through its public function | lead  | ☑      |
 | 1.5 | `BankDataSource` contract test suite                        | lead  | ☐      |
 
 ## Phase 2 — Enable Banking adapter (`services/enableBanking/`)

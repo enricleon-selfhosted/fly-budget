@@ -73,8 +73,9 @@ After inserting an imported transaction, look for its other side: an **imported*
 another account, same currency, opposite amount, within ±4 days, not already a transfer, split,
 reconciled or adjustment. Link the pair when:
 
-1. the bank names the counterparty account (IBAN) and it is one of the user's accounts — that
-   account's candidate wins (if it is unique there), or
+1. the bank names the counterparty account (IBAN) and it is one of the user's accounts — only
+   that account counts, and its closest candidate wins (none, or a tie, means no link: the
+   other side may not be imported yet), or
 2. otherwise, there is exactly one candidate and no other unlinked transaction in this account
    with the same amount in the window (ambiguity in either direction means no link).
 
