@@ -20,7 +20,9 @@ of what matches your filters above the list. Each row shows:
   **Transfer**),
 - the **account** (on the all-transactions list only),
 - a lock if it's [reconciled](./accounts#reconciling),
-- the **amount**: money coming in is green.
+- the **amount**: money coming in is green. In an account in another currency, it also shows
+  what the amount is worth in your budget's currency, or **No rate yet** (see
+  [Accounts in another currency](./accounts#accounts-in-another-currency)).
 
 ## Finding transactions
 
@@ -118,9 +120,9 @@ your bank, the payee goes back to the bank's name for it. Reconciled transfers c
 ### Exchanges
 
 An exchange is a transfer between two accounts in different currencies, such as pounds into euros.
-Each side keeps the amount that really moved, so the rate is the one implied by the two amounts.
-FlyBudget doesn't look up exchange rates, and changing the amount on one side doesn't change the
-other.
+Each side keeps the amount that really moved, so the rate is the one implied by the two amounts,
+and changing the amount on one side doesn't change the other. When one side is in your budget's
+currency, the other side is converted at exactly that rate.
 
 To enter an exchange by hand, choose an account in another currency as the transfer target, and
 enter the amount received, in that account's currency. [Income in another currency](./accounts#income-in-another-currency)

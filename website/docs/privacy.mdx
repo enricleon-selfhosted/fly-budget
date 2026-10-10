@@ -22,7 +22,7 @@ Nothing is sent to the FlyBudget project, ever.
 
 ## What leaves your device
 
-Only bank sync talks to the internet, and only if you set it up:
+Only bank sync and exchange rates talk to the internet, and only if you set them up:
 
 - **SimpleFIN** or **Plaid** send your transactions to FlyBudget over HTTPS. You sign in to your
   bank on their website or your bank's, never inside FlyBudget, and FlyBudget never sees your
@@ -36,6 +36,10 @@ Only bank sync talks to the internet, and only if you set it up:
   password. Read Enable Banking's privacy policy at [enablebanking.com](https://enablebanking.com).
 - Your Enable Banking private key and bank sessions are encrypted on your computer or server, never
   shown to the app's page, and left out of backups.
+- **Exchange rates**, if you turn on downloading them in
+  [Settings → Currencies](./settings#currencies), come from the European Central Bank through
+  [Frankfurter](https://frankfurter.dev). FlyBudget sends only currency codes and dates, never
+  amounts or anything about your accounts.
 
 Everything else (the fonts, the icons, the charts) is part of the app. FlyBudget loads nothing
 from other websites.

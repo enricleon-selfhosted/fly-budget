@@ -42,7 +42,7 @@ The [OpenSSF Scorecard](https://openssf.org/projects/scorecard/) is an independe
 
 FlyBudget is **local-first**. Your budget lives in a database file on your own computer, and the app talks to its own small built-in server that only listens on your machine (`127.0.0.1`). There is no FlyBudget cloud to be breached, no account to be phished, and no analytics.
 
-The only time FlyBudget talks to the internet is when bank sync connects to **Plaid**, **SimpleFIN** or **Enable Banking** on your behalf, always over encrypted HTTPS.
+FlyBudget talks to the internet only when bank sync connects to **Plaid**, **SimpleFIN** or **Enable Banking** on your behalf, and, if you turn on downloading exchange rates, when it asks [Frankfurter](https://frankfurter.dev) for the European Central Bank's daily rates. That request carries only currency codes and dates. Every connection uses encrypted HTTPS.
 
 ## If you host FlyBudget yourself
 
