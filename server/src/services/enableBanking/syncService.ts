@@ -24,6 +24,8 @@ export type SyncResult = {
   added: number;
   matched: number;
   transfers: number;
+  /** Matched to an occurrence of a recurring item */
+  recurring: number;
   status: 'good' | 'error' | 'reauth_required';
   errors: string[];
   /** A background sync that didn't run because the connection synced recently */
@@ -73,6 +75,7 @@ async function runSync(
     added: 0,
     matched: 0,
     transfers: 0,
+    recurring: 0,
     status: 'good',
     errors: [],
   };
@@ -133,6 +136,7 @@ async function runSync(
       result.added += imported.added;
       result.matched += imported.matched;
       result.transfers += imported.transfers;
+      result.recurring += imported.recurring;
 
       const balance = await source.fetchBalance();
       if (balance && balance.currency === bank.currency) {

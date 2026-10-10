@@ -80,6 +80,8 @@ const scheduleFields = {
   categoryId: id.nullable().optional(),
   payeeId: id.nullable().optional(),
   notes: z.string().max(5_000).nullable().optional(),
+  /** Bank text that identifies this item's transactions, e.g. "ACME LTD PAYROLL" */
+  matchText: z.string().trim().max(200).nullable().optional(),
   status: statusEnum,
   autoCreate: z.number().int().min(0).max(1),
 };
@@ -300,6 +302,7 @@ schedulesRouter.post('/', (req, res) => {
     categoryId: data.categoryId ?? null,
     payeeId: data.payeeId ?? null,
     notes: data.notes ?? null,
+    matchText: data.matchText || null,
     status: data.status,
     autoCreate: data.autoCreate,
     autoCreateFrom: data.autoCreate ? today : null,

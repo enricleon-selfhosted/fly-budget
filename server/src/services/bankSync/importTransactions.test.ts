@@ -3,7 +3,15 @@ import fc from 'fast-check';
 import { eq, like } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { db } from '../../db/index.js';
-import { accounts, categories, categoryGroups, rules, transactions } from '../../db/schema.js';
+import {
+  accounts,
+  categories,
+  categoryGroups,
+  rules,
+  scheduleOccurrences,
+  schedules,
+  transactions,
+} from '../../db/schema.js';
 import { importTransactions } from './importTransactions.js';
 import type { RemoteTransaction } from './types.js';
 
@@ -14,6 +22,8 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  db.delete(scheduleOccurrences).run();
+  db.delete(schedules).run();
   db.delete(transactions).run();
   db.delete(accounts).run();
   db.delete(rules).run();
@@ -79,7 +89,14 @@ describe('adding', () => {
       remote({ externalId: 'e1', notes: 'Card 1234' }),
     ]);
 
-    expect(result).toEqual({ added: 1, matched: 0, transfers: 0, duplicates: 0, otherCurrency: 0 });
+    expect(result).toEqual({
+      added: 1,
+      matched: 0,
+      transfers: 0,
+      recurring: 0,
+      duplicates: 0,
+      otherCurrency: 0,
+    });
     expect(rowsOf(a)).toMatchObject([
       {
         amount: -1234,
@@ -447,5 +464,69 @@ describe('currency exchanges at the same bank (Revolut)', () => {
         },
       ).transfers,
     ).toBe(0);
+  });
+});
+
+describe('recurring items', () => {
+  it('matches a weekly pay in another currency, recognized by its bank text, whatever the amount', () => {
+    const gbp = `acct-${++seq}`;
+    const scheduleId = `s-${seq}`;
+    const occurrence = (i: number) => `occ-${scheduleId}-${i}`;
+    db.insert(accounts)
+      .values({ id: gbp, name: 'Revolut GBP', type: 'checking', currency: 'GBP', isOffBudget: 1 })
+      .run();
+    db.insert(schedules)
+      .values({
+        id: scheduleId,
+        name: 'Weekly pay',
+        amount: 60_000,
+        amountType: 'variable',
+        recurrenceType: 'weekly',
+        startDate: '2026-03-06',
+        accountId: gbp,
+        matchText: 'ACME LTD',
+      })
+      .run();
+    for (const [i, date] of ['2026-03-06', '2026-03-13'].entries()) {
+      db.insert(scheduleOccurrences)
+        .values({
+          id: occurrence(i),
+          scheduleId,
+          scheduledDate: date,
+          expectedDate: date,
+          expectedAmount: 60_000,
+        })
+        .run();
+    }
+
+    const result = importTransactions(target(gbp, 'GBP'), [
+      remote({
+        externalId: 'p1',
+        currency: 'GBP',
+        date: '2026-03-12',
+        amount: 71_250,
+        payeeName: 'Acme Ltd',
+        importedPayee: 'FASTER PAYMENT ACME LTD 0042',
+      }),
+      remote({
+        externalId: 'x1',
+        currency: 'GBP',
+        date: '2026-03-12',
+        amount: 1_500,
+        payeeName: 'Friend',
+        importedPayee: 'FROM JOHN',
+      }),
+    ]);
+
+    expect(result).toMatchObject({ added: 2, recurring: 1 });
+    const pay = rowsOf(gbp).find((r) => r.amount === 71_250)!;
+    expect(
+      db
+        .select()
+        .from(scheduleOccurrences)
+        .where(eq(scheduleOccurrences.id, occurrence(1)))
+        .get(),
+    ).toMatchObject({ status: 'paid', matchedTransactionId: pay.id, matchType: 'automatic' });
+    expect(pay.scheduleId).toBe(scheduleId);
   });
 });

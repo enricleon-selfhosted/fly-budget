@@ -4,6 +4,7 @@ import { db } from '../../db/index.js';
 import { accounts, transactions } from '../../db/schema.js';
 import { buildRuleContext, insertNewTransaction, loadRules } from '../ruleService.js';
 import { linkTransfer } from '../transactionHelpers.js';
+import { autoMatchImported } from '../matchingEngine.js';
 import type { ExchangeCandidate, ManualCandidate, TransferCandidate } from './matching.js';
 
 // Everything importTransactions reads or writes, so the import logic doesn't depend on
@@ -64,6 +65,8 @@ export interface ImportStore {
   ): ExchangeCandidate[];
   /** Links two transactions as a transfer; false if they can't be linked */
   linkTransfer(aId: string, bId: string): boolean;
+  /** Matches new transactions to recurring items where it's clear; returns how many */
+  matchRecurring(transactionIds: readonly string[]): number;
 }
 
 const shift = (date: string, days: number) => format(addDays(parseISO(date), days), 'yyyy-MM-dd');
@@ -226,6 +229,10 @@ export function createSqliteImportStore(): ImportStore {
 
     linkTransfer(aId, bId) {
       return linkTransfer(aId, bId).ok;
+    },
+
+    matchRecurring(transactionIds) {
+      return autoMatchImported(transactionIds);
     },
   };
 }

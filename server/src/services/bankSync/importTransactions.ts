@@ -27,7 +27,8 @@ export type ImportContext = {
  * 4. then link each new transaction to its other side when money moved between the user's
  *    own accounts — or was changed into another currency at the same bank (D27; counted in
  *    `transfers`). This runs after every new row of the batch is in, so a second transaction
- *    of the same amount in this batch makes the pairing ambiguous rather than a guess.
+ *    of the same amount in this batch makes the pairing ambiguous rather than a guess;
+ * 5. and match new transactions to recurring items where it's clear (D29).
  */
 export function importTransactions(
   target: ImportTarget,
@@ -39,6 +40,7 @@ export function importTransactions(
     added: 0,
     matched: 0,
     transfers: 0,
+    recurring: 0,
     duplicates: 0,
     otherCurrency: 0,
   };
@@ -114,6 +116,8 @@ export function importTransactions(
       result.transfers++;
   }
 
+  // 5. Recurring items (bills, pay) recognized without asking when it's clear (D29)
+  result.recurring = store.matchRecurring(added.map((a) => a.id));
   return result;
 }
 
