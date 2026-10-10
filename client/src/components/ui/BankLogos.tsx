@@ -57,3 +57,26 @@ export function SimplefinLogo({ size = 24, className = '' }: LogoProps) {
     </svg>
   );
 }
+
+/** A generic bank building in the current text color, standing in for Enable Banking's logo */
+export function EnableBankingLogo({ size = 24, className = '' }: LogoProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      role="img"
+      aria-label="Enable Banking"
+      className={className}
+    >
+      <path d="M3 9.5 12 4l9 5.5" />
+      <path d="M5.5 11v6.5M9.5 11v6.5M14.5 11v6.5M18.5 11v6.5" />
+      <path d="M3 20.5h18" />
+    </svg>
+  );
+}

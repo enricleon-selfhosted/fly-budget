@@ -312,7 +312,7 @@ function AccountMappingCard({
           <option value="">Select an account...</option>
           {availableAccounts.map((a) => (
             <option key={a.id} value={a.id}>
-              {a.name} ({formatCurrency(a.balance)})
+              {a.name} ({formatCurrency(a.balance, a.currency)})
             </option>
           ))}
         </select>

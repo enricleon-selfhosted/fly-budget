@@ -46,8 +46,13 @@ interface AccountGroupProps {
 function AccountGroup({ label, accounts, balancesAgo }: AccountGroupProps) {
   const [collapsed, setCollapsed] = useState(false);
   const navigate = useNavigate();
-  const groupTotal = accounts.reduce((sum, a) => sum + a.balance, 0);
-  const groupTotalAgo = accounts.reduce((sum, a) => sum + (balancesAgo[a.id] ?? a.balance), 0);
+  // Totals add up one currency: accounts in another currency are shown in theirs, not added here
+  const inBudgetCurrency = accounts.filter((a) => a.currency === null);
+  const groupTotal = inBudgetCurrency.reduce((sum, a) => sum + a.balance, 0);
+  const groupTotalAgo = inBudgetCurrency.reduce(
+    (sum, a) => sum + (balancesAgo[a.id] ?? a.balance),
+    0,
+  );
   const change = groupTotal - groupTotalAgo;
   const changePct = groupTotalAgo !== 0 ? (change / Math.abs(groupTotalAgo)) * 100 : 0;
 
@@ -75,11 +80,13 @@ function AccountGroup({ label, accounts, balancesAgo }: AccountGroupProps) {
           )}
           <span className="text-xs text-text-tertiary">past month</span>
         </div>
-        <span
-          className={`text-base font-semibold tabular-nums ${groupTotal < 0 ? 'text-negative' : 'text-text'}`}
-        >
-          {formatCurrency(groupTotal)}
-        </span>
+        {inBudgetCurrency.length > 0 && (
+          <span
+            className={`text-base font-semibold tabular-nums ${groupTotal < 0 ? 'text-negative' : 'text-text'}`}
+          >
+            {formatCurrency(groupTotal)}
+          </span>
+        )}
       </button>
       {!collapsed && (
         <div className="divide-y divide-border-light">
@@ -98,8 +105,13 @@ function AccountGroup({ label, accounts, balancesAgo }: AccountGroupProps) {
                     size="md"
                   />
                   <div className="min-w-0">
-                    <span className="text-sm font-medium text-text truncate block">
-                      {account.name}
+                    <span className="flex items-center gap-2 min-w-0">
+                      <span className="text-sm font-medium text-text truncate">{account.name}</span>
+                      {account.currency && (
+                        <span className="shrink-0 rounded border border-border bg-surface-alt px-1.5 py-px text-[10px] font-semibold tracking-wide text-text-tertiary">
+                          {account.currency}
+                        </span>
+                      )}
                     </span>
                     <span className="text-xs text-text-tertiary mt-0.5 block">
                       {accountTypeLabel(account.type)}
@@ -108,7 +120,7 @@ function AccountGroup({ label, accounts, balancesAgo }: AccountGroupProps) {
                 </div>
               </div>
               <span className="text-sm font-medium tabular-nums text-text">
-                {formatCurrency(account.balance)}
+                {formatCurrency(account.balance, account.currency)}
               </span>
             </div>
           ))}

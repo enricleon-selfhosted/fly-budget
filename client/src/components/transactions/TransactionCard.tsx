@@ -11,6 +11,8 @@ interface Props {
   payees: PayeeWithCount[];
   /** Shown on the all-transactions page, where rows come from several accounts */
   accountName?: string;
+  /** The account's currency when it isn't the budget's (null or unset = the budget's) */
+  currency?: string | null;
   isSelected: boolean;
   onOpenDetail: (id: string) => void;
 }
@@ -25,6 +27,7 @@ export function TransactionCard({
   categoryEntry,
   payees,
   accountName,
+  currency,
   isSelected,
   onOpenDetail,
 }: Props) {
@@ -74,7 +77,7 @@ export function TransactionCard({
             className={`shrink-0 text-[15px] font-medium tabular-nums ${tx.amount > 0 ? 'text-positive' : 'text-text'}`}
           >
             {tx.amount > 0 ? '+' : ''}
-            {formatCurrency(Math.abs(tx.amount))}
+            {formatCurrency(Math.abs(tx.amount), currency)}
           </span>
         </span>
         <span className="flex items-center gap-1.5 text-xs text-text-tertiary min-w-0">
