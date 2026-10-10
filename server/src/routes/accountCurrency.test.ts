@@ -51,14 +51,15 @@ describe('account currency', () => {
     expect(body.isOffBudget).toBe(1);
   });
 
-  it('refuses to put an account in another currency on budget', async () => {
+  it('an account in another currency can be on budget, from the start or later (M1)', async () => {
     const created = await send('POST', '/accounts', {
       name: 'GBP',
       type: 'savings',
       currency: 'GBP',
       isOffBudget: 0,
     });
-    expect(created.status).toBe(400);
+    expect(created.status).toBe(201);
+    expect(created.body).toMatchObject({ currency: 'GBP', isOffBudget: 0 });
 
     const { body: account } = await send('POST', '/accounts', {
       name: 'CHF',
@@ -66,18 +67,16 @@ describe('account currency', () => {
       currency: 'CHF',
     });
     const updated = await send('PUT', `/accounts/${account.id}`, { isOffBudget: 0 });
-    expect(updated.status).toBe(400);
+    expect(updated.body).toMatchObject({ currency: 'CHF', isOffBudget: 0 });
   });
 
-  it('giving an on-budget account another currency takes it off budget; clearing it does not put it back', async () => {
+  it('changing an account’s currency keeps it on or off budget', async () => {
     const { body: account } = await send('POST', '/accounts', { name: 'Wallet', type: 'cash' });
     const foreign = await send('PUT', `/accounts/${account.id}`, { currency: 'SEK' });
-    expect(foreign.body).toMatchObject({ currency: 'SEK', isOffBudget: 1 });
+    expect(foreign.body).toMatchObject({ currency: 'SEK', isOffBudget: 0 });
 
     const back = await send('PUT', `/accounts/${account.id}`, { currency: null });
-    expect(back.body).toMatchObject({ currency: null, isOffBudget: 1 });
-    const onBudget = await send('PUT', `/accounts/${account.id}`, { isOffBudget: 0 });
-    expect(onBudget.body.isOffBudget).toBe(0);
+    expect(back.body).toMatchObject({ currency: null, isOffBudget: 0 });
   });
 
   it.each(['eur', 'EURO', 'E1R', ''])('rejects %j as a currency', async (currency) => {

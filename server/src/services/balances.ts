@@ -1,6 +1,6 @@
-import { and, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
+import { and, eq, isNull, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { accounts, transactions } from '../db/schema.js';
+import { transactions } from '../db/schema.js';
 
 // A split is stored as a parent row holding the full amount plus child rows holding
 // the parts, all in the same account. Account balances count the parent only;
@@ -23,15 +23,25 @@ export const isIncomeOrSpending: SQL = sql`not (${transactions.isAdjustment} = 1
  */
 export const isNotPlainTransfer: SQL = sql`(${transactions.transferTransactionId} is null or ${transactions.categoryId} is not null)`;
 
+/** Rows in accounts kept in the budget's currency (`accounts.currency` null) */
+const inBudgetCurrencyAccount = sql`${transactions.accountId} in (select id from accounts where currency is null)`;
+
 /**
- * Rows in accounts kept in the budget's currency. Accounts in another currency
- * (`accounts.currency` set) can't be added to them without exchange rates, so totals across
- * accounts (net worth, income and spending reports) leave them out.
+ * A transaction's value in the budget's currency (docs/multi-currency M5): its amount in an
+ * account in the budget's currency; in another currency, its amount at its rate
+ * (`round(amount × fx_rate)`, half away from zero like `convertCents`); null while it has no rate.
+ * The budget and every total across accounts add this up, never `amount`.
  */
-export const inBudgetCurrency: SQL = inArray(
-  transactions.accountId,
-  db.select({ id: accounts.id }).from(accounts).where(isNull(accounts.currency)),
-);
+export const budgetValue = sql<number>`(case when ${inBudgetCurrencyAccount} then ${transactions.amount} when ${transactions.fxRate} is not null then cast(round(${transactions.amount} * ${transactions.fxRate}) as integer) end)`;
+
+/** The sum of `budgetValue`, 0 when there's nothing */
+export const sumBudgetValue = sql<number>`coalesce(sum(${budgetValue}), 0)`;
+
+/**
+ * Rows that have a value in the budget's currency: everything in accounts in the budget's
+ * currency, and converted rows in others. Totals across accounts leave out the rest.
+ */
+export const hasBudgetValue: SQL = sql`${budgetValue} is not null`;
 
 /** Sum of an account's transactions, as added to its starting balance. */
 export function accountTransactionSum(accountId: string): number {

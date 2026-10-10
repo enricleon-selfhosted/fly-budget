@@ -5,6 +5,7 @@ import { databasePath, db, sqlite } from '../db/index.js';
 import {
   accounts,
   budgetMonths,
+  budgetSettings,
   categories,
   categoryGroups,
   customReports,
@@ -19,6 +20,7 @@ import {
   schedules,
   simplefinAccountMappings,
   enableBankingAccounts,
+  exchangeRates,
   transactions,
 } from '../db/schema.js';
 
@@ -49,6 +51,8 @@ const TABLES = {
   dashboardPages,
   dashboardWidgets,
   goals,
+  budgetSettings,
+  exchangeRates,
 } satisfies Record<string, SQLiteTable>;
 
 export type BackupTable = keyof typeof TABLES;
@@ -114,7 +118,9 @@ export function parseBackup(input: unknown): Record<BackupTable, Row[]> {
         const ok =
           column.columnType === 'SQLiteInteger'
             ? Number.isSafeInteger(value)
-            : typeof value === 'string' && value.length <= 1_000_000;
+            : column.columnType === 'SQLiteReal'
+              ? typeof value === 'number' && Number.isFinite(value)
+              : typeof value === 'string' && value.length <= 1_000_000;
         if (!ok) throw new InvalidBackupError(`Row ${i + 1} of "${name}" has an invalid "${key}"`);
         row[key] = value;
       }
@@ -152,13 +158,19 @@ export function restoreBackup(data: Record<BackupTable, Row[]>) {
     .where(isNotNull(enableBankingAccounts.accountId))
     .all();
   const restoredAccounts = new Set(data.accounts.map((a) => a.id as string));
+  // Backups from before budgeting across currencies have no settings or rates: keep this
+  // installation's (the budget currency would otherwise be forgotten)
+  const kept: Partial<Record<BackupTable, Row[]>> = {};
+  for (const name of ['budgetSettings', 'exchangeRates'] as const) {
+    if (!data[name].length) kept[name] = db.select().from(TABLES[name]).all();
+  }
 
   db.transaction((tx) => {
     // Foreign keys are checked once, at commit, so rows can go in table by table
     tx.run(sql`PRAGMA defer_foreign_keys = ON`);
     for (const name of [...BACKUP_TABLES].reverse()) tx.delete(TABLES[name]).run();
     for (const name of BACKUP_TABLES) {
-      const rows = data[name];
+      const rows = kept[name] ?? data[name];
       // Chunked: SQLite limits how many values one statement may bind
       for (let i = 0; i < rows.length; i += 200) {
         tx.insert(TABLES[name])

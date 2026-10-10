@@ -6,7 +6,12 @@ import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import { logoSchema } from '../utils/logo.js';
 import { accountTypeSchema, defaultOffBudget } from '../utils/accountTypes.js';
-import { currencyCode, offBudgetFor } from '../utils/currency.js';
+import { currencyCode, startsOffBudget } from '../utils/currency.js';
+import { format } from 'date-fns';
+import { convertCents } from '../services/fx/conversion.js';
+import { latestRate, refreshFx } from '../services/fx/fxService.js';
+import { scheduleRatesDownload } from '../services/fx/download.js';
+import { uncategorizeTransfersThatStopCrossing } from '../services/transactionHelpers.js';
 import { accountTransactionSum, inAccountBalance } from '../services/balances.js';
 
 export const accountsRouter = Router();
@@ -20,8 +25,6 @@ const fields = {
   currency: currencyCode.nullable(),
 };
 
-const FOREIGN_ON_BUDGET = 'Accounts in another currency stay off budget';
-
 const createSchema = z.object({
   ...fields,
   startingBalance: fields.startingBalance.default(0),
@@ -33,8 +36,31 @@ const createSchema = z.object({
 // that only renames an account would otherwise reset its starting balance to 0
 const updateSchema = z.object(fields).partial().extend({ logo: logoSchema.optional() });
 
-function withBalance(account: typeof accounts.$inferSelect) {
-  return { ...account, balance: account.startingBalance + accountTransactionSum(account.id) };
+type Account = typeof accounts.$inferSelect;
+
+/**
+ * An account with its balance and, in another currency, that balance's value in the budget's
+ * currency at the latest rate (docs/multi-currency M6; null without a rate) and the rate's date.
+ */
+function withBudgetBalance(account: Account, balance: number, today: string) {
+  if (!account.currency) return { ...account, balance };
+  const rate = latestRate(account.currency, today);
+  return {
+    ...account,
+    balance,
+    budgetBalance: rate ? convertCents(balance, rate.rate) : null,
+    budgetBalanceAsOf: rate?.date ?? null,
+  };
+}
+
+const today = () => format(new Date(), 'yyyy-MM-dd');
+
+function withBalance(account: Account) {
+  return withBudgetBalance(
+    account,
+    account.startingBalance + accountTransactionSum(account.id),
+    today(),
+  );
 }
 
 accountsRouter.get('/', (_req, res) => {
@@ -57,7 +83,8 @@ accountsRouter.get('/', (_req, res) => {
     .all();
 
   const sumMap = Object.fromEntries(sums.map((s) => [s.accountId, s.sum]));
-  res.json(rows.map((a) => ({ ...a, balance: a.startingBalance + (sumMap[a.id] ?? 0) })));
+  const day = today();
+  res.json(rows.map((a) => withBudgetBalance(a, a.startingBalance + (sumMap[a.id] ?? 0), day)));
 });
 
 accountsRouter.get('/balances-ago', (_req, res) => {
@@ -89,23 +116,24 @@ accountsRouter.post('/', (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
   const currency = parsed.data.currency ?? null;
-  if (currency && parsed.data.isOffBudget === 0)
-    return res.status(400).json({ error: FOREIGN_ON_BUDGET });
   const account = {
     id: nanoid(),
     ...parsed.data,
     currency,
-    // Homes, cars, investments and loans stay off budget unless asked otherwise
-    isOffBudget: offBudgetFor(
+    // Homes, cars, investments, loans and accounts in another currency start off budget unless
+    // asked otherwise
+    isOffBudget: startsOffBudget(
       currency,
-      (parsed.data.isOffBudget as 0 | 1 | undefined) ?? defaultOffBudget(parsed.data.type),
+      parsed.data.isOffBudget as 0 | 1 | undefined,
+      defaultOffBudget(parsed.data.type),
     ),
     sortOrder: 0,
     closedAt: null,
     createdAt: new Date().toISOString(),
   };
   db.insert(accounts).values(account).run();
-  res.status(201).json(withBalance(account as typeof accounts.$inferSelect));
+  if (currency) scheduleRatesDownload();
+  res.status(201).json(withBalance(account as Account));
 });
 
 accountsRouter.put('/reorder', (req, res) => {
@@ -149,17 +177,22 @@ accountsRouter.put('/:id', (req, res) => {
   const data = { ...parsed.data };
   const existing = db.select().from(accounts).where(eq(accounts.id, req.params.id)).get();
   if (!existing) return res.status(404).json({ error: 'Not found' });
-  const currency = data.currency !== undefined ? data.currency : existing.currency;
-  if (currency) {
-    if (data.isOffBudget === 0) return res.status(400).json({ error: FOREIGN_ON_BUDGET });
-    if (existing.isOffBudget === 0) data.isOffBudget = 1;
-  }
   if (Object.keys(data).length) {
     db.update(accounts).set(data).where(eq(accounts.id, req.params.id)).run();
   }
   const updated = db.select().from(accounts).where(eq(accounts.id, req.params.id)).get();
   if (!updated) return res.status(404).json({ error: 'Not found' });
-  res.json(withBalance(updated));
+  // Its transactions are now converted, or not, at a rate (docs/multi-currency M3)
+  if (updated.currency !== existing.currency) {
+    refreshFx({ accountIds: [updated.id] });
+    scheduleRatesDownload();
+  }
+  // Transfers whose category stopped making sense (M8)
+  const transfersUncategorized =
+    updated.isOffBudget !== existing.isOffBudget
+      ? uncategorizeTransfersThatStopCrossing(updated.id)
+      : 0;
+  res.json({ ...withBalance(updated), transfersUncategorized });
 });
 
 accountsRouter.delete('/:id', (req, res) => {

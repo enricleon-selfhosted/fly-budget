@@ -13,7 +13,7 @@ const currency = fc.constantFrom('EUR', 'USD', 'SEK');
 const bank = (c: string) => ({ name: 'Cuenta', currency: c, cashAccountType: 'CACC' });
 
 describe('planMapping', () => {
-  it('creates accounts in another currency off budget with that currency, others as asked', () => {
+  it('creates accounts as asked, and when not asked, ones in another currency off budget', () => {
     fc.assert(
       fc.property(
         currency,
@@ -30,7 +30,10 @@ describe('planMapping', () => {
             expect(plan.account.currency).toBeNull();
             expect(plan.account.isOffBudget).toBe(offBudget ?? 0);
           } else {
-            expect(plan.account).toMatchObject({ currency: bankCurrency, isOffBudget: 1 });
+            expect(plan.account).toMatchObject({
+              currency: bankCurrency,
+              isOffBudget: offBudget ?? 1,
+            });
           }
         },
       ),

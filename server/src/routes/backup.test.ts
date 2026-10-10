@@ -7,6 +7,8 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { db } from '../db/index.js';
 import { errorHandler } from '../middleware/security.js';
 import { BACKUP_TABLES } from '../services/backupService.js';
+import { saveManualRate } from '../services/fx/ratesStore.js';
+import { getBudgetSettings, saveBudgetSettings } from '../services/fx/settings.js';
 import { accountsRouter } from './accounts.js';
 import { dashboardsRouter } from './dashboards.js';
 import { exportRouter } from './export.js';
@@ -154,5 +156,37 @@ describe('backup and restore', () => {
     expect(res.status).toBe(200);
     const { body } = await send('GET', '/accounts');
     expect(body.map((a: { id: string }) => a.id)).toEqual(['old']);
+  });
+
+  it('keeps the budget currency, rates and conversions (docs/multi-currency)', async () => {
+    saveBudgetSettings({ currency: 'EUR' });
+    saveManualRate('GBP', 'EUR', '2026-01-01', 1.17);
+    const gbp = (await send('POST', '/accounts', { name: 'GBP', type: 'cash', currency: 'GBP' }))
+      .body;
+    await send('POST', '/transactions', { accountId: gbp.id, date: '2026-01-02', amount: -1_000 });
+    const data = await backup();
+    expect(data.budgetSettings).toMatchObject([{ currency: 'EUR' }]);
+    expect(data.exchangeRates).toMatchObject([{ base: 'GBP', rate: 1.17, source: 'manual' }]);
+    expect(data.transactions).toMatchObject([{ fxRate: 1.17, fxSource: 'rate' }]);
+
+    const restored = await send('POST', '/export/restore', data);
+    expect(restored.status).toBe(200);
+    expect(await backup()).toEqual(data);
+
+    // A rate must be a number
+    const broken = structuredClone(data);
+    broken.exchangeRates[0].rate = '1.17';
+    expect((await send('POST', '/export/restore', broken)).status).toBe(400);
+  });
+
+  it('restoring a backup from before budget currencies keeps this installation’s', async () => {
+    saveBudgetSettings({ currency: 'CHF' });
+    const res = await send('POST', '/export/restore', {
+      format: 'flybudget-backup',
+      version: 2,
+      accounts: [],
+    });
+    expect(res.status).toBe(200);
+    expect(getBudgetSettings().currency).toBe('CHF');
   });
 });

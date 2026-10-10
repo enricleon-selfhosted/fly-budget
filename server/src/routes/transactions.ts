@@ -22,6 +22,13 @@ import { addDays, format, parseISO } from 'date-fns';
 const TRANSFER_CANDIDATE_DAYS = 7;
 import { buildRuleContext, insertNewTransaction, loadRules } from '../services/ruleService.js';
 import { isoDate } from '../utils/validation.js';
+import { convertCents } from '../services/fx/conversion.js';
+import {
+  checkBudgetAmount,
+  convertTransactions,
+  foreignCurrencies,
+  setBudgetAmount,
+} from '../services/fx/fxService.js';
 
 export const transactionsRouter = Router();
 
@@ -57,7 +64,12 @@ const createSchema = z.object({
     .optional(),
 });
 
-const updateSchema = createSchema.omit({ id: true, splits: true, adjustment: true }).partial();
+const updateSchema = createSchema
+  .omit({ id: true, splits: true, adjustment: true })
+  .partial()
+  // In an account in another currency: its value in the budget's currency, typed in (null goes
+  // back to the day's rate; docs/multi-currency M3)
+  .extend({ budgetAmount: cents.nullable().optional() });
 
 const transferSchema = z
   .object({
@@ -189,11 +201,21 @@ transactionsRouter.get('/', (req, res) => {
       : [],
   );
 
+  // In accounts in another currency, each row's value in the budget's currency (null while it
+  // has no rate); rows in the budget's currency don't have one
+  const foreign = foreignCurrencies();
+  const withBudgetAmount = <T extends (typeof rows)[number]>(r: T) =>
+    foreign.has(r.accountId)
+      ? { ...r, budgetAmount: r.fxRate === null ? null : convertCents(r.amount, r.fxRate) }
+      : r;
+
   const result = rows.map((r) => {
     const other = r.transferTransactionId ? others.get(r.transferTransactionId) : undefined;
     return {
-      ...r,
-      ...(r.isParent === 1 ? { children: childrenMap.get(r.id) ?? [] } : {}),
+      ...withBudgetAmount(r),
+      ...(r.isParent === 1
+        ? { children: (childrenMap.get(r.id) ?? []).map(withBudgetAmount) }
+        : {}),
       ...(other ? { transferAccountId: other.accountId, transferAmount: other.amount } : {}),
     };
   });
@@ -272,6 +294,7 @@ transactionsRouter.post('/', (req, res) => {
       tx.insert(transactions).values(parent).run();
       for (const child of childRows) tx.insert(transactions).values(child).run();
     });
+    convertTransactions([parentId]);
 
     return res.status(201).json({ ...parent, children: childRows });
   }
@@ -376,6 +399,7 @@ transactionsRouter.post('/transfer', (req, res) => {
     tx.insert(transactions).values(fromTx).run();
     tx.insert(transactions).values(toTx).run();
   });
+  convertTransactions([fromId, toId]);
   res.status(201).json([fromTx, toTx]);
 });
 
@@ -487,7 +511,11 @@ transactionsRouter.put('/:id', (req, res) => {
   if (existing.reconciled === 1)
     return res.status(403).json({ error: 'Cannot modify a reconciled transaction' });
 
-  const data = parsed.data;
+  const { budgetAmount, ...data } = parsed.data;
+  if (budgetAmount !== undefined) {
+    const problem = checkBudgetAmount(existing.id, budgetAmount);
+    if (!problem.ok) return res.status(problem.status).json({ error: problem.error });
+  }
   const changes = (key: keyof typeof data) =>
     data[key] !== undefined && data[key] !== existing[key];
   if (
@@ -554,6 +582,8 @@ transactionsRouter.put('/:id', (req, res) => {
       }
     }
   });
+  convertTransactions([existing.id]);
+  if (budgetAmount !== undefined) setBudgetAmount(existing.id, budgetAmount);
   const updated = db.select().from(transactions).where(eq(transactions.id, req.params.id)).get();
   res.json(updated);
 });

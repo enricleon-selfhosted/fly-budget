@@ -15,6 +15,8 @@ import {
   type TxState,
 } from './rulesEngine.js';
 import { resolvePayee } from './transactionHelpers.js';
+import { convertTransactions, foreignCurrencies } from './fx/fxService.js';
+import { scheduleRatesDownload } from './fx/download.js';
 
 type RuleRow = typeof rules.$inferSelect;
 type TxRow = typeof transactions.$inferSelect;
@@ -88,7 +90,15 @@ type InsertOptions = {
  * category, the payee's default category applies. A split action creates a parent plus children.
  */
 export function insertNewTransaction(input: NewTransactionInput, opts: InsertOptions = {}) {
-  if (input.isAdjustment) return insertAdjustment(input);
+  const result = input.isAdjustment ? insertAdjustment(input) : insertWithRules(input, opts);
+  // In an account in another currency: its rate to the budget's (docs/multi-currency M3)
+  if (convertTransactions([result.transaction.id]) === 0 && foreignCurrencies().size) {
+    scheduleRatesDownload();
+  }
+  return result;
+}
+
+function insertWithRules(input: NewTransactionInput, opts: InsertOptions) {
   let payeeId = input.payeeId;
   if (!payeeId && input.payeeName) {
     payeeId =
@@ -339,6 +349,8 @@ export function applyRules(opts: PlanOptions & { transactionIds: string[] }): nu
       }
     }
   });
+  // Parts of a split in another currency share its rate
+  convertTransactions(plan.filter((p) => p.changes.split).map((p) => p.transactionId));
   return plan.length;
 }
 
