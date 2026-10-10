@@ -22,7 +22,13 @@ export const updateAccount = (
     currency: string | null;
     logo: string | null;
   }>,
-) => apiFetch<Account>(`/accounts/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+) =>
+  // `transfersUncategorized`: transfers that lost their category because the account moved on
+  // or off budget
+  apiFetch<Account & { transfersUncategorized?: number }>(`/accounts/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
 
 export const closeAccount = (id: string) => apiFetch<void>(`/accounts/${id}`, { method: 'DELETE' });
 

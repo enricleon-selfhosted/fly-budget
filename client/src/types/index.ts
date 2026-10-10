@@ -205,6 +205,47 @@ export interface Transaction {
   transferAccountId?: string;
   /** …and its amount, which differs from this side's in an exchange between currencies */
   transferAmount?: number;
+  /** Accounts in another currency: the rate to the budget's currency it's converted at */
+  fxRate?: number | null;
+  fxSource?: FxSource | null;
+  /**
+   * Accounts in another currency only: the value in the budget's currency (null while it has no
+   * rate). Absent for transactions in the budget's currency.
+   */
+  budgetAmount?: number | null;
+}
+
+/** Where a transaction's rate came from: typed in, an exchange into the budget currency, the day's rate */
+export type FxSource = 'manual' | 'exchange' | 'rate';
+
+/** A currency accounts are kept in, with its latest rate to the budget's currency */
+export interface CurrencyInUse {
+  code: string;
+  accounts: number;
+  latest: { rate: number; date: string } | null;
+  /** Transactions in this currency still without a rate */
+  waiting: number;
+}
+
+/** GET /api/currencies */
+export interface CurrencyOverview {
+  /** null until a client has sent it */
+  budgetCurrency: string | null;
+  downloadRates: boolean;
+  ratesUpdatedAt: string | null;
+  /** null, 'unreachable', or 'unsupported:ARS,KES' */
+  ratesError: string | null;
+  currencies: CurrencyInUse[];
+}
+
+/** One day's rate: 1 `base` = `rate` `quote` (the budget's currency) */
+export interface ExchangeRate {
+  id: string;
+  date: string;
+  base: string;
+  quote: string;
+  rate: number;
+  source: 'ecb' | 'manual';
 }
 
 /** A transaction "Link as transfer" offers as the other side */
@@ -301,6 +342,8 @@ export interface BudgetSummary {
   totalBudgeted: number;
   carryOver: number;
   toBeBudgeted: number;
+  /** Categorized transactions in budget accounts in another currency still without a rate */
+  waitingForRate?: number;
 }
 
 export interface Account {
@@ -315,11 +358,16 @@ export interface Account {
   logo: string | null;
   /**
    * ISO 4217 code when the account is in another currency than the budget's (null = the budget
-   * currency). Such accounts stay off budget and out of net worth totals.
+   * currency). Its transactions are converted to the budget's currency at a rate, and it can be on
+   * or off budget (docs/multi-currency).
    */
   currency: string | null;
   createdAt: string;
   balance: number;
+  /** Accounts in another currency: the balance at the latest rate (null without a rate) */
+  budgetBalance?: number | null;
+  /** …and that rate's date */
+  budgetBalanceAsOf?: string | null;
 }
 
 export interface NetWorthPoint {
