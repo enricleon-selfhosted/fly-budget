@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import {
+  EXCHANGE_WINDOW_DAYS,
   MATCH_WINDOW_DAYS,
   TRANSFER_WINDOW_DAYS,
   daysBetween,
+  mentionsCurrency,
+  pickExchangeCounterpart,
   pickManualMatch,
   pickTransferCounterpart,
   type ManualCandidate,
@@ -179,5 +182,84 @@ describe('pickTransferCounterpart', () => {
   it('never pairs a zero amount', () => {
     const zero = { id: 'z', accountId: 'B', date: day(0), amount: 0 };
     expect(pickTransferCounterpart(query({ amount: 0 }), [zero])).toBeNull();
+  });
+});
+
+describe('mentionsCurrency', () => {
+  it('finds a currency code as a word, in any case, and not inside other words', () => {
+    for (const text of ['Exchanged to EUR', 'GBP→EUR', 'cambio eur', 'EUR', '(EUR) Revolut'])
+      expect(mentionsCurrency(text, 'EUR'), text).toBe(true);
+    for (const text of ['Eurostar', 'NEURO CLINIC', 'Europa', ''])
+      expect(mentionsCurrency(text, 'EUR'), text).toBe(false);
+  });
+});
+
+describe('pickExchangeCounterpart', () => {
+  const partners = new Map([
+    ['gbp', 'GBP'],
+    ['eur', 'EUR'],
+    ['usd', 'USD'],
+  ]);
+  const exchange = fc.record({
+    id: fc.uuid(),
+    accountId: fc.constantFrom('gbp', 'eur', 'usd', 'elsewhere'),
+    offset: fc.integer({ min: -3, max: 3 }),
+    amount: fc.constantFrom(-58_025, -10_000, 58_025, 10_000),
+    text: fc.constantFrom('Exchanged from GBP', 'Exchanged to EUR', 'Card payment', 'USD top-up'),
+  });
+  const query = (siblings = 0) => ({
+    accountId: 'gbp',
+    currency: 'GBP',
+    date: day(0),
+    amount: -50_000,
+    text: 'Exchanged to EUR',
+    partners,
+    siblings,
+  });
+
+  it('only picks the opposite direction in another currency at the same bank, a day apart at most', () => {
+    fc.assert(
+      fc.property(fc.array(exchange, { maxLength: 10 }), (raw) => {
+        const candidates = raw.map((c) => ({ ...c, date: day(c.offset) }));
+        const picked = pickExchangeCounterpart(query(), candidates);
+        if (picked === null) return;
+        const c = candidates.find((x) => x.id === picked)!;
+        expect(partners.has(c.accountId)).toBe(true);
+        expect(partners.get(c.accountId)).not.toBe('GBP');
+        expect(c.amount).toBeGreaterThan(0);
+        expect(daysBetween(c.date, day(0))).toBeLessThanOrEqual(EXCHANGE_WINDOW_DAYS);
+        // It must be the only one that qualifies
+        const rivals = candidates.filter(
+          (x) =>
+            x.id !== c.id &&
+            partners.has(x.accountId) &&
+            partners.get(x.accountId) !== 'GBP' &&
+            x.amount > 0 &&
+            daysBetween(x.date, day(0)) <= EXCHANGE_WINDOW_DAYS &&
+            (mentionsCurrency('Exchanged to EUR', partners.get(x.accountId)!) ||
+              mentionsCurrency(x.text, 'GBP')),
+        );
+        expect(rivals).toEqual([]);
+      }),
+    );
+  });
+
+  it('needs the bank text to name the other currency', () => {
+    const quiet = { ...query(), text: 'Transfer' };
+    const card = { id: 'x', accountId: 'eur', date: day(0), amount: 58_025, text: 'Card refund' };
+    expect(pickExchangeCounterpart(quiet, [card])).toBeNull();
+    expect(pickExchangeCounterpart(quiet, [{ ...card, text: 'Exchanged from GBP' }])).toBe('x');
+  });
+
+  it('never guesses when this account has another exchange-like transaction', () => {
+    const into = {
+      id: 'x',
+      accountId: 'eur',
+      date: day(0),
+      amount: 58_025,
+      text: 'Exchanged from GBP',
+    };
+    expect(pickExchangeCounterpart(query(0), [into])).toBe('x');
+    expect(pickExchangeCounterpart(query(1), [into])).toBeNull();
   });
 });

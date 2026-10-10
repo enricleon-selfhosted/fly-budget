@@ -290,6 +290,7 @@ export function createEnableBankingService(deps: EnableBankingServiceDeps = {}) 
             added: 0,
             matched: 0,
             transfers: 0,
+            recurring: 0,
             status: 'error',
             errors: [enableBankingErrorMessage(err, 'Sync failed.')],
           });

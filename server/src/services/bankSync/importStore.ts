@@ -1,10 +1,11 @@
-import { and, eq, gte, isNotNull, isNull, lte, ne, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, isNotNull, isNull, lte, ne, sql } from 'drizzle-orm';
 import { addDays, format, parseISO } from 'date-fns';
 import { db } from '../../db/index.js';
 import { accounts, transactions } from '../../db/schema.js';
 import { buildRuleContext, insertNewTransaction, loadRules } from '../ruleService.js';
 import { linkTransfer } from '../transactionHelpers.js';
-import type { ManualCandidate, TransferCandidate } from './matching.js';
+import { autoMatchImported } from '../matchingEngine.js';
+import type { ExchangeCandidate, ManualCandidate, TransferCandidate } from './matching.js';
 
 // Everything importTransactions reads or writes, so the import logic doesn't depend on
 // how transactions are stored.
@@ -53,8 +54,19 @@ export interface ImportStore {
     date: string,
     days: number,
   ): number;
+  /**
+   * Imported, unlinked whole transactions in these accounts around this date, with their bank
+   * text, that could be one side of a currency exchange
+   */
+  exchangeCandidates(
+    accountIds: readonly string[],
+    date: string,
+    days: number,
+  ): ExchangeCandidate[];
   /** Links two transactions as a transfer; false if they can't be linked */
   linkTransfer(aId: string, bId: string): boolean;
+  /** Matches new transactions to recurring items where it's clear; returns how many */
+  matchRecurring(transactionIds: readonly string[]): number;
 }
 
 const shift = (date: string, days: number) => format(addDays(parseISO(date), days), 'yyyy-MM-dd');
@@ -191,8 +203,36 @@ export function createSqliteImportStore(): ImportStore {
         .all().length;
     },
 
+    exchangeCandidates(accountIds, date, days) {
+      if (!accountIds.length) return [];
+      return db
+        .select({
+          id: transactions.id,
+          accountId: transactions.accountId,
+          date: transactions.date,
+          amount: transactions.amount,
+          text: sql<string>`coalesce(${transactions.importedPayee}, ${transactions.payeeName}, '') || ' ' || coalesce(${transactions.notes}, '')`,
+        })
+        .from(transactions)
+        .where(
+          and(
+            inArray(transactions.accountId, [...accountIds]),
+            isNotNull(transactions.importedId),
+            plain,
+            eq(transactions.isParent, 0),
+            eq(transactions.reconciled, 0),
+            around(date, days),
+          ),
+        )
+        .all();
+    },
+
     linkTransfer(aId, bId) {
       return linkTransfer(aId, bId).ok;
+    },
+
+    matchRecurring(transactionIds) {
+      return autoMatchImported(transactionIds);
     },
   };
 }
