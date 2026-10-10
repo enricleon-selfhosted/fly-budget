@@ -1,7 +1,10 @@
 import { createSqliteImportStore, type ImportStore } from './importStore.js';
 import {
+  EXCHANGE_WINDOW_DAYS,
   MATCH_WINDOW_DAYS,
   TRANSFER_WINDOW_DAYS,
+  looksLikeExchange,
+  pickExchangeCounterpart,
   pickManualMatch,
   pickTransferCounterpart,
 } from './matching.js';
@@ -10,6 +13,8 @@ import type { ImportResult, ImportTarget, RemoteTransaction } from './types.js';
 export type ImportContext = {
   /** SHA-256 of an IBAN → the user's account it belongs to, to recognize transfers */
   ownAccountsByIbanHash?: ReadonlyMap<string, string>;
+  /** The user's other accounts at the same bank, with their currencies, to recognize exchanges */
+  exchangePartners?: ReadonlyMap<string, string>;
   store?: ImportStore;
 };
 
@@ -20,7 +25,8 @@ export type ImportContext = {
  * 2. merge into a transaction the user typed in (same amount, close date) instead of adding;
  * 3. otherwise add it, with rules and payees, through insertNewTransaction;
  * 4. then link each new transaction to its other side when money moved between the user's
- *    own accounts. This runs after every new row of the batch is in, so a second transaction
+ *    own accounts — or was changed into another currency at the same bank (D27; counted in
+ *    `transfers`). This runs after every new row of the batch is in, so a second transaction
  *    of the same amount in this batch makes the pairing ambiguous rather than a guess.
  */
 export function importTransactions(
@@ -100,8 +106,47 @@ export function importTransactions(
       },
       store.transferCandidates(target.accountId, row.amount, row.date, TRANSFER_WINDOW_DAYS),
     );
-    if (other && store.linkTransfer(id, other)) result.transfers++;
+    if (other && store.linkTransfer(id, other)) {
+      result.transfers++;
+      continue;
+    }
+    if (ctx.exchangePartners?.size && linkExchange(id, row, target, ctx.exchangePartners, store))
+      result.transfers++;
   }
 
   return result;
+}
+
+/** Links a new transaction to its other side in a currency exchange at the same bank (D27) */
+function linkExchange(
+  id: string,
+  row: { date: string; amount: number },
+  target: ImportTarget,
+  partners: ReadonlyMap<string, string>,
+  store: ImportStore,
+): boolean {
+  const here = store.exchangeCandidates([target.accountId], row.date, EXCHANGE_WINDOW_DAYS);
+  const self = here.find((c) => c.id === id);
+  if (!self) return false;
+  // Another transaction here that also looks like an exchange makes it a guess
+  const siblings = here.filter(
+    (c) =>
+      c.id !== id &&
+      Math.sign(c.amount) === Math.sign(row.amount) &&
+      looksLikeExchange(c.text, target.currency, partners),
+  ).length;
+  const others = [...partners.keys()].filter((accountId) => accountId !== target.accountId);
+  const other = pickExchangeCounterpart(
+    {
+      accountId: target.accountId,
+      currency: target.currency,
+      date: row.date,
+      amount: row.amount,
+      text: self.text,
+      partners,
+      siblings,
+    },
+    store.exchangeCandidates(others, row.date, EXCHANGE_WINDOW_DAYS),
+  );
+  return !!other && store.linkTransfer(id, other);
 }

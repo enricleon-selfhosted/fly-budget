@@ -316,3 +316,136 @@ describe('transfers between the user’s accounts', () => {
     ).toHaveLength(2);
   });
 });
+
+describe('currency exchanges at the same bank (Revolut)', () => {
+  function revolut() {
+    const gbp = `acct-${++seq}`;
+    db.insert(accounts)
+      .values({ id: gbp, name: 'Revolut GBP', type: 'checking', currency: 'GBP', isOffBudget: 1 })
+      .run();
+    const eur = account('Revolut EUR');
+    return {
+      gbp,
+      eur,
+      partners: new Map([
+        [gbp, 'GBP'],
+        [eur, 'EUR'],
+      ]),
+    };
+  }
+  const gbpTarget = (id: string) => ({ ...target(id, 'GBP') });
+
+  it('links the two sides of an exchange, keeping the income category on the budget side', () => {
+    db.insert(categoryGroups)
+      .values({ id: 'gi', name: 'Income', isIncome: 1 })
+      .onConflictDoNothing()
+      .run();
+    db.insert(categories)
+      .values({ id: 'salary', groupId: 'gi', name: 'Salary' })
+      .onConflictDoNothing()
+      .run();
+    db.insert(rules)
+      .values({
+        id: 'r-exchange',
+        conditions: JSON.stringify([
+          { field: 'imported_payee', op: 'contains', value: 'exchanged from gbp' },
+        ]),
+        actions: JSON.stringify([{ type: 'set_category', value: 'salary' }]),
+      })
+      .run();
+    const { gbp, eur, partners } = revolut();
+
+    importTransactions(
+      gbpTarget(gbp),
+      [
+        remote({
+          currency: 'GBP',
+          amount: -50_000,
+          payeeName: 'Exchanged to EUR',
+          importedPayee: 'Exchanged to EUR',
+        }),
+      ],
+      { exchangePartners: partners },
+    );
+    const result = importTransactions(
+      target(eur),
+      [
+        remote({
+          amount: 58_025,
+          payeeName: 'Exchanged from GBP',
+          importedPayee: 'Exchanged from GBP',
+        }),
+      ],
+      { exchangePartners: partners },
+    );
+
+    expect(result.transfers).toBe(1);
+    const [out] = rowsOf(gbp);
+    const [into] = rowsOf(eur);
+    expect(out).toMatchObject({
+      amount: -50_000,
+      transferTransactionId: into.id,
+      categoryId: null,
+    });
+    expect(into).toMatchObject({
+      amount: 58_025,
+      transferTransactionId: out.id,
+      categoryId: 'salary',
+      payeeName: 'Transfer: Revolut GBP',
+    });
+  });
+
+  it('leaves it alone when the text names no currency, the bank differs, or two could match', () => {
+    const { gbp, eur, partners } = revolut();
+    importTransactions(
+      gbpTarget(gbp),
+      [remote({ currency: 'GBP', amount: -1_000, importedPayee: 'To pocket' })],
+      {
+        exchangePartners: partners,
+      },
+    );
+    expect(
+      importTransactions(target(eur), [remote({ amount: 1_160, importedPayee: 'From pocket' })], {
+        exchangePartners: partners,
+      }).transfers,
+    ).toBe(0);
+
+    // Without the bank's partner accounts (another bank), nothing is guessed
+    importTransactions(gbpTarget(gbp), [
+      remote({ currency: 'GBP', amount: -2_000, importedPayee: 'Exchanged to EUR' }),
+    ]);
+    expect(
+      importTransactions(target(eur), [
+        remote({ amount: 2_320, importedPayee: 'Exchanged from GBP' }),
+      ]).transfers,
+    ).toBe(0);
+
+    importTransactions(
+      gbpTarget(gbp),
+      [
+        remote({
+          externalId: 'g1',
+          currency: 'GBP',
+          amount: -3_000,
+          importedPayee: 'Exchanged to EUR',
+        }),
+        remote({
+          externalId: 'g2',
+          currency: 'GBP',
+          amount: -4_000,
+          importedPayee: 'Exchanged to EUR',
+        }),
+      ],
+      { exchangePartners: partners },
+    );
+    expect(
+      importTransactions(
+        target(eur),
+        [remote({ amount: 3_480, importedPayee: 'Exchanged from GBP' })],
+        {
+          exchangePartners: partners,
+        },
+      ).transfers,
+    ).toBe(0);
+  });
+});

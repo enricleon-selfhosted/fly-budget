@@ -95,8 +95,15 @@ async function runSync(
   enableBankingStore.setStatus(connectionId, 'syncing');
   const today = format(startedAt, 'yyyy-MM-dd');
   const ownAccountsByIbanHash = enableBankingStore.ownAccountsByIbanHash();
+  const bankAccounts = enableBankingStore.listAccounts(connectionId);
+  // The connection's imported accounts and their currencies: exchanges happen within a bank
+  const exchangePartners = new Map(
+    bankAccounts
+      .filter((b) => b.accountId && b.isEnabled && b.currency)
+      .map((b) => [b.accountId!, b.currency!]),
+  );
 
-  for (const bank of enableBankingStore.listAccounts(connectionId)) {
+  for (const bank of bankAccounts) {
     if (!bank.accountId || !bank.isEnabled || !bank.currency) continue;
     const local = db
       .select({ id: accounts.id, closedAt: accounts.closedAt })
@@ -121,7 +128,7 @@ async function runSync(
           currency: bank.currency,
         },
         remote,
-        { ownAccountsByIbanHash },
+        { ownAccountsByIbanHash, exchangePartners },
       );
       result.added += imported.added;
       result.matched += imported.matched;
