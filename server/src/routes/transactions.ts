@@ -1,14 +1,25 @@
 import { Router } from 'express';
 import { db } from '../db/index.js';
 import { transactions, payees, accounts, categories } from '../db/schema.js';
-import { eq, and, or, like, gte, lte, sql, isNull, inArray } from 'drizzle-orm';
+import { eq, and, or, like, gte, lte, sql, isNull, inArray, ne } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import {
   deleteTransactionRow,
+  linkTransfer,
   resolvePayee,
   unlinkTransfer,
 } from '../services/transactionHelpers.js';
+import {
+  mirrorsAmount,
+  sameCurrency,
+  sideTakesCategory,
+  transferPairProblem,
+} from '../utils/transferRules.js';
+import { addDays, format, parseISO } from 'date-fns';
+
+/** "Link as transfer" looks this many days either side for the other side */
+const TRANSFER_CANDIDATE_DAYS = 7;
 import { buildRuleContext, insertNewTransaction, loadRules } from '../services/ruleService.js';
 import { isoDate } from '../utils/validation.js';
 
@@ -55,6 +66,10 @@ const transferSchema = z
     toAccountId: id,
     date: isoDate,
     amount: cents.positive(),
+    /** What arrives in the other account when its currency differs (an exchange, D25) */
+    toAmount: cents.positive().optional(),
+    /** Only for the on-budget side of a transfer with an off-budget account (D26) */
+    categoryId: id.nullable().optional(),
     notes: z.string().max(5_000).nullable().optional(),
   })
   .refine((t) => t.fromAccountId !== t.toAccountId, 'Choose two different accounts');
@@ -156,10 +171,32 @@ transactionsRouter.get('/', (req, res) => {
     }
   }
 
-  const result = rows.map((r) => ({
-    ...r,
-    ...(r.isParent === 1 ? { children: childrenMap.get(r.id) ?? [] } : {}),
-  }));
+  // A transfer's other side: its account (is it on budget? which currency?) and amount, which
+  // differs from this side's in an exchange
+  const otherIds = rows.map((r) => r.transferTransactionId).filter((v): v is string => !!v);
+  const others = new Map(
+    otherIds.length
+      ? db
+          .select({
+            id: transactions.id,
+            accountId: transactions.accountId,
+            amount: transactions.amount,
+          })
+          .from(transactions)
+          .where(inArray(transactions.id, otherIds))
+          .all()
+          .map((o) => [o.id, o])
+      : [],
+  );
+
+  const result = rows.map((r) => {
+    const other = r.transferTransactionId ? others.get(r.transferTransactionId) : undefined;
+    return {
+      ...r,
+      ...(r.isParent === 1 ? { children: childrenMap.get(r.id) ?? [] } : {}),
+      ...(other ? { transferAccountId: other.accountId, transferAmount: other.amount } : {}),
+    };
+  });
 
   res.json(result);
 });
@@ -267,15 +304,37 @@ transactionsRouter.post('/transfer', (req, res) => {
   const parsed = transferSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const { id: txId, fromAccountId, toAccountId, date, amount, notes } = parsed.data;
+  const {
+    id: txId,
+    fromAccountId,
+    toAccountId,
+    date,
+    amount,
+    toAmount,
+    categoryId,
+    notes,
+  } = parsed.data;
   const existing = txId && alreadyCreated(txId);
   if (existing) return res.status(200).json(existing);
   const fromAcct = db.select().from(accounts).where(eq(accounts.id, fromAccountId)).get();
   const toAcct = db.select().from(accounts).where(eq(accounts.id, toAccountId)).get();
   if (!fromAcct || !toAcct) return res.status(404).json({ error: 'Account not found' });
-  // Both sides move the same amount: only meaningful within one currency
-  if (fromAcct.currency !== toAcct.currency)
-    return res.status(400).json({ error: 'Transfers need two accounts in the same currency' });
+  // Within one currency both sides move the same amount; an exchange needs what arrived
+  const received = sameCurrency(fromAcct, toAcct) ? amount : toAmount;
+  if (received === undefined)
+    return res.status(400).json({ error: 'Enter the amount received in the other currency' });
+  // Money leaving or entering the budget can be categorized on the budget side (D26)
+  const categorized = categoryId
+    ? sideTakesCategory(fromAcct, toAcct)
+      ? 'from'
+      : sideTakesCategory(toAcct, fromAcct)
+        ? 'to'
+        : null
+    : null;
+  if (categoryId && !categorized)
+    return res
+      .status(400)
+      .json({ error: 'Transfers between two budget accounts have no category' });
 
   const fromId = txId ?? nanoid();
   const toId = nanoid();
@@ -295,7 +354,7 @@ transactionsRouter.post('/transfer', (req, res) => {
     amount: -amount,
     payeeId: null,
     payeeName: `Transfer: ${toAcct.name}`,
-    categoryId: null,
+    categoryId: categorized === 'from' ? categoryId! : null,
     notes: notes ?? null,
     transferTransactionId: toId,
     ...base,
@@ -304,10 +363,10 @@ transactionsRouter.post('/transfer', (req, res) => {
     id: toId,
     accountId: toAccountId,
     date,
-    amount,
+    amount: received,
     payeeId: null,
     payeeName: `Transfer: ${fromAcct.name}`,
-    categoryId: null,
+    categoryId: categorized === 'to' ? categoryId! : null,
     notes: notes ?? null,
     transferTransactionId: fromId,
     ...base,
@@ -392,6 +451,30 @@ transactionsRouter.post('/import/confirm', (req, res) => {
   res.json({ imported, skipped: rows.length - imported });
 });
 
+/** A transfer's two accounts, as the transfer rules need them */
+function transferPair(accountId: string, otherTransactionId: string) {
+  const accountOf = (accId: string | undefined) =>
+    accId
+      ? db
+          .select({
+            id: accounts.id,
+            currency: accounts.currency,
+            isOffBudget: accounts.isOffBudget,
+          })
+          .from(accounts)
+          .where(eq(accounts.id, accId))
+          .get()
+      : undefined;
+  const otherAccountId = db
+    .select({ accountId: transactions.accountId })
+    .from(transactions)
+    .where(eq(transactions.id, otherTransactionId))
+    .get()?.accountId;
+  const self = accountOf(accountId);
+  const other = accountOf(otherAccountId);
+  return self && other ? { self, other } : null;
+}
+
 // PUT /transactions/:id
 // A split's parts and a transfer's other side are separate rows: keep them in step with
 // the row being edited, so budgets and both accounts agree on dates and amounts.
@@ -418,8 +501,25 @@ transactionsRouter.put('/:id', (req, res) => {
   if (existing.isParent === 1 && (changes('amount') || data.categoryId)) {
     return res.status(400).json({ error: 'Edit the parts of a split transaction instead' });
   }
-  if (existing.transferTransactionId && (changes('accountId') || data.categoryId)) {
-    return res.status(400).json({ error: 'Transfers have no category and stay in their accounts' });
+  // The other side of a transfer and both accounts, to apply the transfer rules (D25, D26)
+  const pair = existing.transferTransactionId
+    ? transferPair(existing.accountId, existing.transferTransactionId)
+    : null;
+  if (pair) {
+    if (changes('accountId'))
+      return res.status(400).json({ error: 'Transfers stay in their accounts' });
+    if (data.categoryId && !sideTakesCategory(pair.self, pair.other))
+      return res
+        .status(400)
+        .json({ error: 'Transfers between two budget accounts have no category' });
+    if (
+      data.amount !== undefined &&
+      !mirrorsAmount(pair.self, pair.other) &&
+      Math.sign(data.amount) !== Math.sign(existing.amount)
+    )
+      return res
+        .status(400)
+        .json({ error: 'An exchange takes money out of one account and puts it into the other' });
   }
 
   db.transaction((tx) => {
@@ -440,15 +540,91 @@ transactionsRouter.put('/:id', (req, res) => {
           .run();
       }
     }
-    if (existing.transferTransactionId && (data.date !== undefined || data.amount !== undefined)) {
-      tx.update(transactions)
-        .set({ date: data.date, amount: data.amount === undefined ? undefined : -data.amount })
-        .where(eq(transactions.id, existing.transferTransactionId))
-        .run();
+    // The other side keeps step: its date always, its amount only within one currency
+    if (pair && (data.date !== undefined || data.amount !== undefined)) {
+      const mirrored =
+        data.amount !== undefined && mirrorsAmount(pair.self, pair.other)
+          ? -data.amount
+          : undefined;
+      if (data.date !== undefined || mirrored !== undefined) {
+        tx.update(transactions)
+          .set({ date: data.date, amount: mirrored })
+          .where(eq(transactions.id, existing.transferTransactionId!))
+          .run();
+      }
     }
   });
   const updated = db.select().from(transactions).where(eq(transactions.id, req.params.id)).get();
   res.json(updated);
+});
+
+// GET /transactions/:id/transfer-candidates — what "Link as transfer" offers: transactions in
+// the user's other open accounts that could be this one's other side (D25), closest date first
+transactionsRouter.get('/:id/transfer-candidates', (req, res) => {
+  const row = db.select().from(transactions).where(eq(transactions.id, req.params.id)).get();
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  const self = db
+    .select({ id: accounts.id, currency: accounts.currency, isOffBudget: accounts.isOffBudget })
+    .from(accounts)
+    .where(eq(accounts.id, row.accountId))
+    .get();
+  if (!self || row.amount === 0) return res.json([]);
+
+  const shift = (days: number) => format(addDays(parseISO(row.date), days), 'yyyy-MM-dd');
+  const nearby = db
+    .select({
+      id: transactions.id,
+      accountId: transactions.accountId,
+      accountName: accounts.name,
+      currency: accounts.currency,
+      isOffBudget: accounts.isOffBudget,
+      date: transactions.date,
+      amount: transactions.amount,
+      payeeName: transactions.payeeName,
+    })
+    .from(transactions)
+    .innerJoin(accounts, eq(accounts.id, transactions.accountId))
+    .where(
+      and(
+        ne(transactions.accountId, row.accountId),
+        isNull(accounts.closedAt),
+        isNull(transactions.transferTransactionId),
+        isNull(transactions.parentTransactionId),
+        eq(transactions.isParent, 0),
+        eq(transactions.isAdjustment, 0),
+        eq(transactions.reconciled, 0),
+        gte(transactions.date, shift(-TRANSFER_CANDIDATE_DAYS)),
+        lte(transactions.date, shift(TRANSFER_CANDIDATE_DAYS)),
+      ),
+    )
+    .all();
+
+  const days = (d: string) => Math.abs(Date.parse(d) - Date.parse(row.date)) / 864e5;
+  const candidates = nearby
+    .filter(
+      (c) =>
+        transferPairProblem(
+          { amount: row.amount, account: self },
+          {
+            amount: c.amount,
+            account: { id: c.accountId, currency: c.currency, isOffBudget: c.isOffBudget },
+          },
+        ) === null,
+    )
+    .sort((a, b) => days(a.date) - days(b.date) || a.id.localeCompare(b.id))
+    .slice(0, 20)
+    .map(({ isOffBudget: _, ...c }) => c);
+  res.json(candidates);
+});
+
+// POST /transactions/:id/link-transfer — two existing transactions become one transfer (or an
+// exchange, between accounts in different currencies), e.g. one bank sync didn't recognize
+transactionsRouter.post('/:id/link-transfer', (req, res) => {
+  const parsed = z.object({ otherId: id }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const outcome = linkTransfer(req.params.id, parsed.data.otherId);
+  if (!outcome.ok) return res.status(outcome.status).json({ error: outcome.error });
+  res.json(db.select().from(transactions).where(eq(transactions.id, req.params.id)).get());
 });
 
 // POST /transactions/:id/unlink-transfer — two ordinary transactions again (e.g. bank sync
