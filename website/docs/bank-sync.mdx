@@ -5,16 +5,17 @@ sidebar_label: Connecting a bank
 
 # Connecting a bank
 
-FlyBudget can import transactions automatically through two services. Both are optional: CSV
-import works with almost every bank and costs nothing.
+FlyBudget can import transactions automatically through three services. All of them are optional:
+CSV import works with almost every bank and costs nothing.
 
-|              | Plaid                                                                                  | SimpleFIN Bridge                                                |
-| ------------ | -------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| **Cost**     | Free Plaid developer account                                                           | $1.50 per month, paid to SimpleFIN                              |
-| **Setup**    | Sign up for a Plaid developer account, request Production access, then enter your keys | Create an account at SimpleFIN Bridge, then paste a setup token |
-| **Best for** | People comfortable with developer dashboards                                           | Most people                                                     |
+|              | Plaid                                                                                  | SimpleFIN Bridge                                                | Enable Banking                                                                        |
+| ------------ | -------------------------------------------------------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| **Cost**     | Free Plaid developer account                                                           | $1.50 per month, paid to SimpleFIN                              | Free for personal use (restricted mode)                                               |
+| **Setup**    | Sign up for a Plaid developer account, request Production access, then enter your keys | Create an account at SimpleFIN Bridge, then paste a setup token | Register your own Enable Banking application, link your accounts, then enter its keys |
+| **Best for** | People comfortable with developer dashboards                                           | Most people                                                     | Banks in Europe and the EEA                                                           |
 
-Connect either one from **Settings → Connected Banks**, or from the welcome screen.
+Connect a bank from **Settings → Connected Banks**. Plaid and SimpleFIN can also be connected from
+the welcome screen.
 
 ## Plaid
 
@@ -49,14 +50,145 @@ Disconnecting a bank revokes its access at Plaid before FlyBudget forgets it.
 FlyBudget exchanges the one-time token for a private access link, stored encrypted. To stop
 syncing completely, disconnect in FlyBudget _and_ remove the app in SimpleFIN Bridge.
 
+## Enable Banking
+
+Enable Banking connects FlyBudget to banks in Europe and the rest of the EEA, under the EU's open
+banking rules (PSD2). It takes a little more setup than the others: you register your own
+application with Enable Banking, and then choose which of your bank accounts to import.
+
+Enable Banking's restricted mode, which FlyBudget uses, is free for personal use. Its terms can
+change, so check [enablebanking.com](https://enablebanking.com) for the current ones.
+
+### Set up your application
+
+1. Create an account at [Enable Banking](https://enablebanking.com).
+2. Register an application in the [Enable Banking control panel](https://enablebanking.com/cp/applications),
+   choosing **Production**.
+3. Register a **redirect URL** for the application. Enable Banking only accepts `https` addresses,
+   so which one you use depends on how you run FlyBudget:
+   - **Self-hosted server with HTTPS**: register the redirect URL that FlyBudget suggests under
+     **Settings → Connected Banks → Enable Banking**. That's your server's own callback address,
+     `https://<your-server>/api/enablebanking/callback`. Everything else is then automatic: after
+     you approve at your bank, FlyBudget finishes the connection by itself.
+   - **Desktop app, or a server without HTTPS**: FlyBudget can't receive the redirect, so register
+     any `https` address, such as `https://localhost/flybudget-callback`, and enter the same
+     address in FlyBudget.
+4. Download the **private key**, a file ending in `.pem`, and keep it safe. You'll upload it to
+   FlyBudget, and anyone who has it can act as your application.
+5. Choose **Activate by linking accounts**. In this mode FlyBudget can only read the accounts you
+   link in the control panel, so link each account you want to import there.
+
+### Connect your bank
+
+1. In **Settings → Connected Banks → Enable Banking**, enter the application ID, upload the private
+   key and enter the redirect URL. FlyBudget checks them with Enable Banking before it saves them.
+2. Choose **Connect Bank**, then pick the country and your bank.
+3. Sign in and approve the connection on your bank's own page, in your web browser. Your bank
+   password never passes through FlyBudget.
+4. Choose which accounts to import (see [Choosing accounts](#choosing-accounts)).
+
+:::tip[Desktop app or no HTTPS?]
+
+After you approve, your browser lands on the redirect address you registered. The page may show an
+error, and that's expected. Copy the whole address from the address bar and paste it into the
+waiting screen in FlyBudget. FlyBudget takes the approval from it.
+
+:::
+
+### Choosing accounts
+
+When the bank approves, FlyBudget lists the accounts it can read. For each one, choose:
+
+- **Import as a new account**: FlyBudget creates an account with the bank's name and a suggested
+  type, and imports its transactions.
+- **Add to an existing account**: its transactions go into an account you already have. The two
+  accounts must use the same currency.
+- **Don't import it**: FlyBudget ignores the bank account. Transactions already imported stay if
+  you change your mind later.
+
+Change these at any time with **Manage accounts** on the bank's card.
+
+An account in a different currency from your budget's is created off budget. See
+[Accounts in another currency](./accounts#accounts-in-another-currency).
+
+Each account also has an **Import from** date, and FlyBudget doesn't import anything older than
+it. For a new account it starts 90 days back. Banks often let you read further back right after
+you connect, so you can pick an earlier date then. For an account you add to an existing one, it
+starts the day after the newest transaction that came from a CSV file or the bank, or 90 days back
+if there isn't one.
+
+### How syncing works with Enable Banking
+
+- **Booked transactions only.** Pending transactions are skipped until your bank books them. Their
+  amounts often change when they're booked, which would otherwise create duplicates.
+- **Your own entries are matched.** If you typed a transaction into that account by hand, with the
+  same amount and a date within 10 days of the bank's, the bank's copy is matched to it instead of
+  being imported again. Your date, payee, category and notes stay as you entered them. Reconciled
+  transactions, split parts and balance adjustments are never matched. Transactions imported from
+  a CSV file aren't matched either; for an existing account, the Import from date starts after
+  them, so the two don't overlap.
+- **Transfers are linked.** When money moves between two accounts in your budget, FlyBudget links
+  them as a [transfer](./transactions#transfers) if it's clear which transactions belong together.
+  That's the case when the bank names the other account by its IBAN and it's one of yours, or when
+  there's exactly one matching transaction in the other account, in the opposite direction, within
+  four days. Both accounts must use the same currency. If the other side isn't imported yet, the pair is
+  linked when it arrives and the match is clear. [Unlink transfer](./transactions#transfers)
+  undoes a link.
+- **Balances stay yours.** When FlyBudget creates an account from the bank, the first sync sets its
+  starting balance so that it matches the bank's. After that, FlyBudget never changes your balances
+  on its own, and a sync never changes the starting balance of an account you added to an existing
+  one. Instead, the connection shows the bank's balance next to FlyBudget's, with the difference and
+  a link to [reconcile](./accounts#reconciling).
+- **Four automatic reads a day.** Under PSD2, banks allow four automatic reads a day when you're
+  not there. FlyBudget syncs a connection at startup only if it hasn't synced in the last six hours.
+  **Sync Now** always syncs. On a self-hosted server it also tells the bank you're there (it passes
+  on your browser's address), which some banks need before they share data.
+
+### Renewing access
+
+Your consent to read a bank lasts up to 180 days, and some banks allow less. When it ends, or you
+revoke it at your bank, the connection says access has ended and syncing stops. Choose
+**Renew access** on its card, and approve at your bank again. Your accounts and their transactions
+stay.
+
+Some banks, Spanish ones among them, keep only one consent per user, so approving again replaces
+the old one. That's why renewing updates the existing connection rather than adding a second one.
+An account the bank shows for the first time is listed without an account in FlyBudget, so you can
+choose what to do with it.
+
+### Disconnecting
+
+Disconnecting ends the bank's access at Enable Banking before FlyBudget forgets the connection. If
+Enable Banking can't be reached, FlyBudget keeps the connection and asks you to try again. Your
+imported accounts and transactions stay in your budget.
+
+### Troubleshooting
+
+- **"No accounts were shared."** Enable Banking didn't pass on any accounts. In restricted mode,
+  link the accounts in Enable Banking's control panel first, then connect again.
+- **"This redirect URL isn't registered in your Enable Banking application."** Add the address
+  FlyBudget uses to your application's redirect URLs in the control panel, or enter one that's
+  already there.
+- **"Enable Banking didn't accept the application ID and private key."** Check the application
+  ID, and that the `.pem` file is the private key you downloaded for that application.
+- **"Access to this bank has ended."** Choose **Renew access** on the bank's card.
+- **"Your bank limits how often FlyBudget can read your accounts."** Try again later.
+- **"This bank only shares data while you are using FlyBudget."** Press **Sync Now** while you're
+  using FlyBudget.
+- **"The answer from your bank expired."** Connect again, and finish the steps promptly.
+- **"Could not reach Enable Banking."** Check your internet connection (on a server, the server's),
+  then try again later.
+
 ## How syncing works
 
 - New transactions are imported when FlyBudget starts and whenever you choose **Sync Now**.
+  Enable Banking connections follow their own rules, described [above](#enable-banking).
 - Your [rules](./rules) run on every imported transaction.
 - Reconciled transactions are never changed by a sync.
-- Account balances are adjusted to match what your bank reports.
+- For Plaid and SimpleFIN, account balances are adjusted to match what your bank reports.
 
 ## Your credentials
 
-Bank tokens never leave the FlyBudget server, and they are encrypted at rest. They are never
-included in [backups](./backups). See the [security overview](/community/security) for details.
+Bank tokens never leave the FlyBudget server, and they are encrypted at rest. That includes your
+Enable Banking private key and bank sessions. They are never included in [backups](./backups). See
+the [security overview](/community/security) for details.

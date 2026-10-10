@@ -6,6 +6,7 @@ import { CurrencyInput } from '../ui/CurrencyInput';
 import { useCreateAccount } from '../../hooks/useAccounts';
 import type { AccountType } from '../../types';
 import { accountTypeInfo } from '../../utils/accountTypes';
+import { otherCurrencyCodes, useBudgetCurrency } from '../../utils/budgetCurrency';
 import { AccountTypeSelect } from './AccountTypeSelect';
 
 interface Props {
@@ -18,21 +19,34 @@ export function AddAccountModal({ isOpen, onClose }: Props) {
   const [type, setType] = useState<AccountType>('checking');
   const [amount, setAmount] = useState(0);
   const [isOffBudget, setIsOffBudget] = useState(false);
+  // The account's own currency; null = the budget's
+  const [currency, setCurrency] = useState<string | null>(null);
   const canSave = useCanSave();
   const createAccount = useCreateAccount();
+  const budget = useBudgetCurrency();
   const info = accountTypeInfo(type);
+  // Accounts in another currency are always off budget (the server refuses otherwise)
+  const foreign = currency !== null;
+  const offBudget = foreign || isOffBudget;
 
   function handleClose() {
     setName('');
     setType('checking');
     setAmount(0);
     setIsOffBudget(false);
+    setCurrency(null);
     onClose();
   }
 
   function handleTypeChange(next: AccountType) {
     setType(next);
-    setIsOffBudget(!accountTypeInfo(next).onBudget);
+    setIsOffBudget(foreign || !accountTypeInfo(next).onBudget);
+  }
+
+  function handleCurrencyChange(next: string | null) {
+    setCurrency(next);
+    // Going back to the budget's currency doesn't put the account back on budget
+    if (next !== null) setIsOffBudget(true);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -43,7 +57,8 @@ export function AddAccountModal({ isOpen, onClose }: Props) {
       type,
       // Debts are entered as the amount owed and stored as a negative balance
       startingBalance: info.liability ? -Math.abs(amount) : amount,
-      isOffBudget: isOffBudget ? 1 : 0,
+      isOffBudget: offBudget ? 1 : 0,
+      currency,
     });
     handleClose();
   }
@@ -80,6 +95,23 @@ export function AddAccountModal({ isOpen, onClose }: Props) {
         <AccountTypeSelect value={type} onChange={handleTypeChange} />
 
         <div>
+          <label className="block text-sm font-medium text-text-secondary mb-1">Currency</label>
+          <select
+            aria-label="Currency"
+            value={currency ?? ''}
+            onChange={(e) => handleCurrencyChange(e.target.value || null)}
+            className="block w-full rounded-lg border border-border px-3 py-2 text-sm bg-surface text-text focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 max-md:min-h-11"
+          >
+            <option value="">{`Budget currency (${budget})`}</option>
+            {otherCurrencyCodes(budget, currency).map((code) => (
+              <option key={code} value={code}>
+                {code}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
           <label className="block text-sm font-medium text-text-secondary mb-1">
             {amountLabel}
           </label>
@@ -93,18 +125,22 @@ export function AddAccountModal({ isOpen, onClose }: Props) {
           <p className="mt-1 text-xs text-text-secondary">{amountHint}</p>
         </div>
 
-        <label className="flex items-start gap-3 cursor-pointer">
+        <label
+          className={`flex items-start gap-3 max-md:min-h-11 ${foreign ? 'cursor-not-allowed' : 'cursor-pointer'}`}
+        >
           <input
             type="checkbox"
-            checked={isOffBudget}
+            checked={offBudget}
+            disabled={foreign}
             onChange={(e) => setIsOffBudget(e.target.checked)}
-            className="mt-0.5 h-4 w-4 rounded border-border text-brand-600 focus:ring-brand-500"
+            className="mt-0.5 h-4 w-4 rounded border-border text-brand-600 focus:ring-brand-500 disabled:opacity-60"
           />
           <span className="text-sm text-text-secondary">
             Off budget
             <span className="block text-xs text-text-tertiary">
-              Counts toward net worth but not your budget. Recommended for investments, property and
-              loans.
+              {foreign
+                ? 'Accounts in another currency stay off budget.'
+                : 'Counts toward net worth but not your budget. Recommended for investments, property and loans.'}
             </span>
           </span>
         </label>

@@ -11,6 +11,7 @@ import { AccountIcon } from './AccountIcon';
 import { AccountTypeSelect } from './AccountTypeSelect';
 import { fileToSquareDataUrl } from '../../utils/imageResize';
 import { usePreferencesStore } from '../../store/preferencesStore';
+import { otherCurrencyCodes, useBudgetCurrency } from '../../utils/budgetCurrency';
 
 interface Props {
   account: Account | null;
@@ -22,8 +23,14 @@ export function EditAccountModal({ account, onClose }: Props) {
   const [type, setType] = useState<AccountType>('checking');
   const [startingBalance, setStartingBalance] = useState(0);
   const [isOffBudget, setIsOffBudget] = useState(false);
+  // The account's own currency; null = the budget's
+  const [currency, setCurrency] = useState<string | null>(null);
   const [confirmClose, setConfirmClose] = useState(false);
   const canSave = useCanSave();
+  const budget = useBudgetCurrency();
+  // Accounts in another currency are always off budget (the server refuses otherwise)
+  const foreign = currency !== null;
+  const offBudget = foreign || isOffBudget;
   const [logo, setLogo] = useState<string | null>(null);
   const [logoError, setLogoError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -39,9 +46,16 @@ export function EditAccountModal({ account, onClose }: Props) {
     setType(account.type);
     setStartingBalance(account.startingBalance);
     setIsOffBudget(account.isOffBudget === 1);
+    setCurrency(account.currency ?? null);
     setLogo(account.logo ?? null);
     setLogoError(null);
   });
+
+  function handleCurrencyChange(next: string | null) {
+    setCurrency(next);
+    // Going back to the budget's currency doesn't put the account back on budget
+    if (next !== null) setIsOffBudget(true);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -52,7 +66,8 @@ export function EditAccountModal({ account, onClose }: Props) {
         name: name.trim(),
         type,
         startingBalance,
-        isOffBudget: isOffBudget ? 1 : 0,
+        isOffBudget: offBudget ? 1 : 0,
+        currency,
         ...(logo !== (account.logo ?? null) ? { logo } : {}),
       },
     });
@@ -143,6 +158,23 @@ export function EditAccountModal({ account, onClose }: Props) {
           <AccountTypeSelect value={type} onChange={setType} />
 
           <div>
+            <label className="block text-sm font-medium text-text-secondary mb-1">Currency</label>
+            <select
+              aria-label="Currency"
+              value={currency ?? ''}
+              onChange={(e) => handleCurrencyChange(e.target.value || null)}
+              className="block w-full rounded-lg border border-border px-3 py-2 text-sm bg-surface text-text focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 max-md:min-h-11"
+            >
+              <option value="">{`Budget currency (${budget})`}</option>
+              {otherCurrencyCodes(budget, currency).map((code) => (
+                <option key={code} value={code}>
+                  {code}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
             <label className="block text-sm font-medium text-text-secondary mb-1">
               Starting Balance
             </label>
@@ -154,15 +186,23 @@ export function EditAccountModal({ account, onClose }: Props) {
             />
           </div>
 
-          <label className="flex items-center gap-3 cursor-pointer">
+          <label
+            className={`flex items-center gap-3 max-md:min-h-11 ${foreign ? 'cursor-not-allowed' : 'cursor-pointer'}`}
+          >
             <input
               type="checkbox"
-              checked={isOffBudget}
+              checked={offBudget}
+              disabled={foreign}
               onChange={(e) => setIsOffBudget(e.target.checked)}
-              className="h-4 w-4 rounded border-border text-brand-600 focus:ring-brand-500"
+              className="h-4 w-4 rounded border-border text-brand-600 focus:ring-brand-500 disabled:opacity-60"
             />
             <span className="text-sm text-text-secondary">
               Off budget (excluded from budgeting)
+              {foreign && (
+                <span className="block text-xs text-text-tertiary">
+                  Accounts in another currency stay off budget.
+                </span>
+              )}
             </span>
           </label>
 

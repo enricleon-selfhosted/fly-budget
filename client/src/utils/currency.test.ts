@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
 import { centsToInput, formatCentsAxis, formatCurrency, parseCents } from './currency';
+import { CURRENCY_CODES } from './budgetCurrency';
 
 // Up to ±$100 billion, far beyond any real balance but still exact in a double
 const arbCents = fc.integer({ min: -10_000_000_000_00, max: 10_000_000_000_00 });
@@ -98,5 +99,59 @@ describe('formatCentsAxis (property-based)', () => {
     const ticks = [0, 35_000, 70_000, 100_000, 135_000, 250_000, 1_000_000, 1_500_000];
     const labels = ticks.map((d) => formatCentsAxis(d * 100));
     expect(new Set(labels).size).toBe(ticks.length);
+  });
+});
+
+// "CHF 1,234.50": Intl puts a no-break space between the code and the amount
+const FOREIGN = /^(-?)([A-Z]{3})\u00a0(\d{1,3}(?:,\d{3})*)\.(\d{2})$/;
+
+describe('formatCurrency in another currency (property-based)', () => {
+  // Any three-letter code (Intl accepts them all), plus the ones the app offers
+  const arbForeign = fc.oneof(fc.constantFrom(...CURRENCY_CODES), fc.stringMatching(/^[A-Z]{3}$/));
+
+  it('shows the code, the amount with two decimals and the sign, never NaN', () => {
+    fc.assert(
+      fc.property(arbCents, arbForeign, (cents, code) => {
+        const s = formatCurrency(cents, code);
+        expect(s).not.toContain('NaN');
+        const m = FOREIGN.exec(s);
+        expect(m, s).not.toBeNull();
+        const [, sign, shownCode, whole, frac] = m!;
+        expect(shownCode).toBe(code);
+        expect(sign === '-').toBe(cents < 0);
+        const back = Number(whole.replace(/,/g, '')) * 100 + Number(frac);
+        expect(sign ? -back : back).toBe(cents);
+      }),
+    );
+  });
+
+  it('gives EUR, USD and CHF exact examples with two decimals', () => {
+    expect(formatCurrency(123_456, 'EUR')).toBe('EUR 1,234.56');
+    expect(formatCurrency(123_400, 'USD')).toBe('USD 1,234.00');
+    expect(formatCurrency(-5_000, 'CHF')).toBe('-CHF 50.00');
+  });
+
+  it('gives every offered currency two decimals, including those with none in ISO', () => {
+    for (const code of CURRENCY_CODES) {
+      expect(formatCurrency(100_000, code)).toMatch(/\.00$/);
+    }
+  });
+
+  it('shows a code Intl does not know as "<CODE> 1,234.56"', () => {
+    fc.assert(
+      fc.property(
+        arbCents,
+        fc.string({ minLength: 1, maxLength: 6 }).filter((code) => !/^[a-zA-Z]{3}$/.test(code)),
+        (cents, code) => {
+          const s = formatCurrency(cents, code);
+          const sign = cents < 0 ? '-' : '';
+          const amount = (Math.abs(cents) / 100).toLocaleString('en-US', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          });
+          expect(s).toBe(`${sign}${code} ${amount}`);
+        },
+      ),
+    );
   });
 });

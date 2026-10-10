@@ -1,7 +1,13 @@
 import { useState, useEffect } from 'react';
 import { X, Lock, Trash2, Repeat, Unlink, Wand2 } from 'lucide-react';
-import { useUpdateTransaction, useDeleteTransaction } from '../../hooks/useTransactions';
+import {
+  useUpdateTransaction,
+  useDeleteTransaction,
+  useUnlinkTransfer,
+} from '../../hooks/useTransactions';
 import { useSchedules, useUnmatchByTransaction } from '../../hooks/useSchedules';
+import { useCanSave } from '../../hooks/useConnection';
+import { SavingPausedHint } from '../connection/SavingPausedHint';
 import { CategoryPicker } from './CategoryPicker';
 import { PayeeCombobox } from './PayeeCombobox';
 import { Button } from '../ui/Button';
@@ -49,6 +55,10 @@ export function TransactionDetailPanel({
   const updateTx = useUpdateTransaction();
   const updatePayee = useUpdatePayee();
   const deleteTx = useDeleteTransaction();
+  const unlinkTransferTx = useUnlinkTransfer();
+  const canSave = useCanSave();
+  // The account's own currency when it isn't the budget's (null = the budget's)
+  const currency = accounts.find((a) => a.id === tx.accountId)?.currency ?? null;
   const showCategoryIcons = usePreferencesStore((s) => s.showCategoryIcons);
   const { data: schedules = [] } = useSchedules();
   const unmatchByTx = useUnmatchByTransaction();
@@ -68,6 +78,8 @@ export function TransactionDetailPanel({
     setLocalNotes(tx.notes ?? '');
     setLocalPayee({ id: tx.payeeId, name: tx.payeeName ?? '' });
     setShowCategoryPicker(false);
+    // An error from unlinking another transaction doesn't belong to this one
+    unlinkTransferTx.reset();
   }, [tx.id, tx.date, tx.notes, tx.payeeId, tx.payeeName]);
 
   useEffect(() => {
@@ -183,7 +195,7 @@ export function TransactionDetailPanel({
           <span
             className={`text-lg font-semibold tabular-nums ${tx.amount > 0 ? 'text-positive' : 'text-text'}`}
           >
-            {formatCurrency(Math.abs(tx.amount))}
+            {formatCurrency(Math.abs(tx.amount), currency)}
           </span>
         </div>
 
@@ -227,7 +239,7 @@ export function TransactionDetailPanel({
                       </span>
                     </div>
                     <span className="tabular-nums text-text-tertiary">
-                      {formatCurrency(Math.abs(child.amount))}
+                      {formatCurrency(Math.abs(child.amount), currency)}
                     </span>
                   </div>
                 );
@@ -324,6 +336,28 @@ export function TransactionDetailPanel({
             <Wand2 size={14} />
             Create rule
           </Button>
+        )}
+        {isTransfer && !isReconciled && (
+          <div className="space-y-2">
+            <Button
+              variant="secondary"
+              onClick={() => unlinkTransferTx.mutate(tx.id)}
+              disabled={!canSave || unlinkTransferTx.isPending}
+              className="w-full"
+            >
+              <Unlink size={14} />
+              {unlinkTransferTx.isPending ? 'Unlinking…' : 'Unlink transfer'}
+            </Button>
+            <p className="text-xs text-text-tertiary">
+              Turns this transfer back into two separate transactions.
+            </p>
+            <SavingPausedHint />
+            {unlinkTransferTx.error && (
+              <p role="alert" className="text-xs text-negative">
+                {unlinkTransferTx.error.message}
+              </p>
+            )}
+          </div>
         )}
         {!isReconciled && (
           <Button variant="danger" onClick={() => setShowDeleteConfirm(true)} className="w-full">
