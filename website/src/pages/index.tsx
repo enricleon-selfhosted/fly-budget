@@ -277,7 +277,7 @@ const FEATURES: Feature[] = [
         <polygon points="12 2 20 7 4 7" />
       </Icon>
     ),
-    text: 'Bring in transactions automatically with SimpleFIN or Plaid, or import a CSV file from your bank. Syncing is optional.',
+    text: 'Bring in transactions automatically with SimpleFIN, Plaid or Enable Banking, or import a CSV file from your bank. Syncing is optional.',
     doc: '/docs/bank-sync',
     docLabel: 'Connecting a bank',
   },
