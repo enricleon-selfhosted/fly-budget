@@ -4,7 +4,9 @@ import { Modal } from '../ui/Modal';
 import { Input } from '../ui/Input';
 import { useTransactions } from '../../hooks/useTransactions';
 import { useMatchOccurrence } from '../../hooks/useSchedules';
+import { useAccounts } from '../../hooks/useAccounts';
 import { formatCurrency } from '../../utils/currency';
+import { NO_ACCOUNTS, accountCurrencyLookup } from './scheduleFormat';
 import type { ScheduleOccurrence } from '../../types';
 
 interface Props {
@@ -16,6 +18,9 @@ interface Props {
 export default function OccurrenceMatchModal({ isOpen, onClose, occurrence }: Props) {
   const [search, setSearch] = useState('');
   const matchOcc = useMatchOccurrence();
+  const { data: accounts = NO_ACCOUNTS } = useAccounts();
+  // Each amount is shown in its own account's currency (null = the budget's)
+  const currencyOf = useMemo(() => accountCurrencyLookup(accounts), [accounts]);
 
   const dateRange = useMemo(() => {
     if (!occurrence) return { from: '', to: '' };
@@ -68,7 +73,7 @@ export default function OccurrenceMatchModal({ isOpen, onClose, occurrence }: Pr
           <p className="text-sm font-medium text-text">{occurrence.scheduleName}</p>
           <p className="text-xs text-text-tertiary mt-0.5">
             Expected: {format(parseISO(occurrence.expectedDate), 'MMM d, yyyy')} ·{' '}
-            {formatCurrency(occurrence.expectedAmount)}
+            {formatCurrency(occurrence.expectedAmount, currencyOf(occurrence.scheduleAccountId))}
           </p>
         </div>
 
@@ -100,7 +105,7 @@ export default function OccurrenceMatchModal({ isOpen, onClose, occurrence }: Pr
                   <span
                     className={`text-sm font-medium tabular-nums ${tx.amount > 0 ? 'text-positive' : 'text-text'}`}
                   >
-                    {formatCurrency(tx.amount)}
+                    {formatCurrency(tx.amount, currencyOf(tx.accountId))}
                   </span>
                   <button
                     onClick={() => handleMatch(tx.id)}

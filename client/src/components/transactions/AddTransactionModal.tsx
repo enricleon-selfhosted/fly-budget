@@ -6,6 +6,8 @@ import { Button } from '../ui/Button';
 import { SavedOnDeviceHint } from '../connection/SavingPausedHint';
 import { CurrencyInput } from '../ui/CurrencyInput';
 import { formatCurrency } from '../../utils/currency';
+import { accountCurrency, useBudgetCurrency } from '../../utils/budgetCurrency';
+import { budgetSideHint, crossesBudgetBoundary, isExchange } from '../../utils/transfers';
 import { useAccounts } from '../../hooks/useAccounts';
 import { useAddTransaction } from '../../hooks/useOffline';
 import { MerchantSelect } from './MerchantSelect';
@@ -28,6 +30,10 @@ export function AddTransactionModal({ isOpen, onClose }: Props) {
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [accountId, setAccountId] = useState('');
   const [categoryId, setCategoryId] = useState<string | null>(null);
+  // The other side of an exchange, in the other account's currency (see `exchange` below)
+  const [received, setReceived] = useState(0);
+  // The on-budget side of a transfer with an off-budget account (D26)
+  const [budgetCategoryId, setBudgetCategoryId] = useState<string | null>(null);
   const [showAccountPicker, setShowAccountPicker] = useState(false);
   const [notes, setNotes] = useState('');
 
@@ -40,19 +46,37 @@ export function AddTransactionModal({ isOpen, onClose }: Props) {
   const onBudgetAccounts = openAccounts.filter((a) => !a.isOffBudget);
   const offBudgetAccounts = openAccounts.filter((a) => a.isOffBudget);
   const selectedAccount = openAccounts.find((a) => a.id === accountId);
-  // Once an account is chosen, the category list also offers a transfer to any other account
-  // A transfer moves the same amount on both sides, so only between accounts in one currency
-  const transferAccounts = accountId
-    ? openAccounts.filter((a) => a.id !== accountId && a.currency === selectedAccount?.currency)
-    : [];
+  const budgetCode = useBudgetCurrency();
+  // Once an account is chosen, the category list also offers a transfer to any other account,
+  // in any currency: across currencies it's an exchange (D25)
+  const transferAccounts = accountId ? openAccounts.filter((a) => a.id !== accountId) : [];
   const transferToId = categoryId?.startsWith('transfer:')
     ? categoryId.slice('transfer:'.length)
     : null;
+  const transferAccount = transferToId
+    ? openAccounts.find((a) => a.id === transferToId)
+    : undefined;
+  const debit = type === 'debit';
+  // A debit moves money out of the selected account, a credit brings it in
+  const toAccount = debit ? transferAccount : selectedAccount;
+  const exchange =
+    !!selectedAccount && !!transferAccount && isExchange(selectedAccount, transferAccount);
+  // Money crosses the budget boundary: the on-budget side may carry a category (D26)
+  const boundary =
+    !!selectedAccount &&
+    !!transferAccount &&
+    crossesBudgetBoundary(selectedAccount, transferAccount);
+  const budgetSideReceives = boundary && toAccount?.isOffBudget === 0;
+  const receivedCode = transferAccount ? accountCurrency(transferAccount, budgetCode) : budgetCode;
 
   const hasConfirmedMerchant = payeeId !== null;
   const dateValid = date !== '' && /^\d{4}-\d{2}-\d{2}$/.test(date) && isValidDate(parseISO(date));
   const isValid =
-    amount > 0 && (hasConfirmedMerchant || transferToId !== null) && dateValid && accountId !== '';
+    amount > 0 &&
+    (hasConfirmedMerchant || transferToId !== null) &&
+    dateValid &&
+    accountId !== '' &&
+    (!exchange || received > 0);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -74,6 +98,8 @@ export function AddTransactionModal({ isOpen, onClose }: Props) {
       setAccountId('');
       setShowAccountPicker(false);
       setCategoryId(null);
+      setReceived(0);
+      setBudgetCategoryId(null);
       setNotes('');
     }
   }, [isOpen]);
@@ -88,15 +114,22 @@ export function AddTransactionModal({ isOpen, onClose }: Props) {
   function handleSubmit() {
     if (!isValid) return;
     if (transferToId) {
-      // A debit moves money out of this account, a credit brings it in
+      // The transfer's `amount` is the sending side's and `toAmount` the receiving side's (D25).
+      // The typed amount is the selected account's; the other side's is `received`.
+      const sides = !exchange
+        ? { amount }
+        : debit
+          ? { amount, toAmount: received }
+          : { amount: received, toAmount: amount };
       newTx.add(
         {
           kind: 'transfer',
           data: {
-            fromAccountId: type === 'debit' ? accountId : transferToId,
-            toAccountId: type === 'debit' ? transferToId : accountId,
+            fromAccountId: debit ? accountId : transferToId,
+            toAccountId: debit ? transferToId : accountId,
             date,
-            amount,
+            ...sides,
+            categoryId: boundary ? budgetCategoryId : null,
             notes: notes || null,
           },
         },
@@ -290,6 +323,37 @@ export function AddTransactionModal({ isOpen, onClose }: Props) {
             transferAccounts={transferAccounts}
           />
         </div>
+
+        {/* Exchange: the other side's amount, in its own currency. A credit's other side sends */}
+        {exchange && transferAccount && (
+          <div>
+            <label className="block text-sm font-medium text-text mb-1">
+              {debit ? 'Amount received' : 'Amount sent'} ({receivedCode}) *
+            </label>
+            <CurrencyInput
+              value={received}
+              onChange={setReceived}
+              currency={transferAccount.currency}
+              aria-label={`${debit ? 'Amount received' : 'Amount sent'} (${receivedCode})`}
+            />
+          </div>
+        )}
+
+        {/* Money into or out of the budget through a transfer: the budget side's category */}
+        {boundary && (
+          <div>
+            <label className="block text-sm font-medium text-text mb-1">Budget category</label>
+            <CategorySelectButton
+              label="Budget category"
+              value={budgetCategoryId}
+              onChange={setBudgetCategoryId}
+              position="above"
+            />
+            <p className="text-xs text-text-tertiary mt-1.5">
+              {budgetSideHint(budgetSideReceives)}
+            </p>
+          </div>
+        )}
 
         {/* Notes */}
         <div>

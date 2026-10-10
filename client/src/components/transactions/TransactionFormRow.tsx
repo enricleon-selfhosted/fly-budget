@@ -7,6 +7,8 @@ import { CategorySelect } from './CategorySelect';
 import type { Account, CategoryGroup, Payee, Transaction } from '../../types';
 import type { CreateTransactionData, SplitItem } from '../../api/transactions';
 import { parseCents, centsToInput, formatCurrency } from '../../utils/currency';
+import { accountCurrency, useBudgetCurrency } from '../../utils/budgetCurrency';
+import { isExchange } from '../../utils/transfers';
 
 interface Props {
   initial?: Transaction;
@@ -14,7 +16,8 @@ interface Props {
   groups: CategoryGroup[];
   payees: Payee[];
   accounts?: Account[];
-  onSave: (data: CreateTransactionData) => void;
+  /** `toAmount`: for a transfer across currencies, the other account's amount (D25) */
+  onSave: (data: CreateTransactionData, toAmount?: number) => void;
   onCancel: () => void;
   onDelete?: () => void;
   /** `row`: inline in the register (desktop). `sheet`: one column in a phone sheet. */
@@ -53,7 +56,10 @@ export function TransactionFormRow({
   const [inflow, setInflow] = useState(
     initial?.amount !== undefined && initial.amount > 0 ? centsToInput(initial.amount) : '',
   );
+  // A transfer across currencies: what the other account gets (or sends), in its currency
+  const [received, setReceived] = useState('');
   const [splitMode, setSplitMode] = useState(false);
+  const budgetCode = useBudgetCurrency();
   // New transactions can be saved offline: they wait on this device until it reconnects
   const { allowed: canAdd, onDevice } = useCanAddTransaction();
   const [splits, setSplits] = useState<SplitRow[]>([
@@ -63,6 +69,14 @@ export function TransactionFormRow({
 
   const isTransfer = categoryId?.startsWith('transfer:');
   const isEditingParent = initial?.isParent === 1;
+  const transferTargetId = isTransfer ? categoryId!.slice('transfer:'.length) : null;
+  const rowAccount = accounts?.find((a) => a.id === accountId);
+  const transferAccount = transferTargetId
+    ? accounts?.find((a) => a.id === transferTargetId)
+    : undefined;
+  const exchange = !!rowAccount && !!transferAccount && isExchange(rowAccount, transferAccount);
+  const receivedCents = parseCents(received);
+  const receivedValid = !exchange || receivedCents > 0;
 
   function getTotalCents() {
     const inflowCents = parseCents(inflow);
@@ -71,6 +85,7 @@ export function TransactionFormRow({
 
   function handleSave() {
     const amount = getTotalCents();
+    if (!receivedValid) return;
 
     if (splitMode) {
       const splitItems: SplitItem[] = splits
@@ -96,15 +111,18 @@ export function TransactionFormRow({
       return;
     }
 
-    onSave({
-      accountId,
-      date,
-      payeeId: payee.id,
-      payeeName: payee.name || null,
-      categoryId,
-      notes: notes || null,
-      amount,
-    });
+    onSave(
+      {
+        accountId,
+        date,
+        payeeId: payee.id,
+        payeeName: payee.name || null,
+        categoryId,
+        notes: notes || null,
+        amount,
+      },
+      exchange ? receivedCents : undefined,
+    );
   }
 
   function updateSplit(idx: number, field: keyof SplitRow, value: string | null) {
@@ -126,6 +144,9 @@ export function TransactionFormRow({
   const splitTotal = splits.reduce((sum, s) => sum + parseCents(s.amount), 0);
   const totalCents = Math.abs(getTotalCents());
   const splitRemaining = totalCents - splitTotal;
+  // Money coming in from the other account is sent by it; going out, it's received by it
+  const movesIn = getTotalCents() > 0;
+  const receivedLabel = `${movesIn ? 'Sent' : 'Received'} (${transferAccount ? accountCurrency(transferAccount, budgetCode) : budgetCode})`;
 
   // Sheet: 16px text, so phones don't zoom into the field, and taller touch targets
   const inputCls = sheet
@@ -142,7 +163,7 @@ export function TransactionFormRow({
   const saveButton = (
     <button
       onClick={handleSave}
-      disabled={!canAdd}
+      disabled={!canAdd || !receivedValid}
       className={
         sheet
           ? `${sheetBtn} flex-1 bg-brand-600 text-white`
@@ -281,6 +302,22 @@ export function TransactionFormRow({
             className={`${inputCls} text-right tabular-nums`}
           />
         </div>
+        {exchange && (
+          <div className={sheet ? 'col-span-2' : 'w-36'}>
+            <label className={labelCls}>{receivedLabel}</label>
+            <input
+              type="number"
+              inputMode="decimal"
+              value={received}
+              aria-label={receivedLabel}
+              onChange={(e) => setReceived(e.target.value)}
+              placeholder="0.00"
+              min="0"
+              step="0.01"
+              className={`${inputCls} text-right tabular-nums`}
+            />
+          </div>
+        )}
         {!sheet && (
           <>
             <div className="flex-1" />

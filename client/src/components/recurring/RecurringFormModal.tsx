@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useId } from 'react';
 import { useFormReset } from '../../hooks/useFormReset';
 import { Modal } from '../ui/Modal';
 import { Input, Select } from '../ui/Input';
@@ -10,6 +10,7 @@ import { usePayees } from '../../hooks/usePayees';
 import { useCanSave } from '../../hooks/useConnection';
 import { SavingPausedHint } from '../connection/SavingPausedHint';
 import { format } from 'date-fns';
+import { NO_ACCOUNTS } from './scheduleFormat';
 import {
   RECURRENCE_TYPE_LABELS,
   type Schedule,
@@ -39,7 +40,7 @@ const WEEKEND_ADJUST_OPTIONS: { value: WeekendAdjust; label: string }[] = [
 ];
 
 export default function RecurringFormModal({ isOpen, onClose, onSave, editItem }: Props) {
-  const { data: accounts = [] } = useAccounts();
+  const { data: accounts = NO_ACCOUNTS } = useAccounts();
   const { data: payees = [] } = usePayees();
   const canSave = useCanSave();
 
@@ -58,6 +59,7 @@ export default function RecurringFormModal({ isOpen, onClose, onSave, editItem }
     id: null,
     name: '',
   });
+  const [matchText, setMatchText] = useState('');
   const [notes, setNotes] = useState('');
   const [autoCreate, setAutoCreate] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -82,6 +84,7 @@ export default function RecurringFormModal({ isOpen, onClose, onSave, editItem }
       setCategoryId(editItem.categoryId || '');
       const matchedPayee = editItem.payeeId ? payees.find((p) => p.id === editItem.payeeId) : null;
       setPayeeValue({ id: editItem.payeeId, name: matchedPayee?.name ?? '' });
+      setMatchText(editItem.matchText ?? '');
       pendingDefaults.current = {
         account: false,
         payee: Boolean(editItem.payeeId && !matchedPayee),
@@ -103,6 +106,7 @@ export default function RecurringFormModal({ isOpen, onClose, onSave, editItem }
       pendingDefaults.current = { account: accounts.length === 0, payee: false };
       setCategoryId('');
       setPayeeValue({ id: null, name: '' });
+      setMatchText('');
       setNotes('');
       setAutoCreate(false);
       setShowAdvanced(false);
@@ -142,6 +146,7 @@ export default function RecurringFormModal({ isOpen, onClose, onSave, editItem }
       accountId: accountId || null,
       categoryId: categoryId || null,
       payeeId: payeeValue.id || null,
+      matchText: matchText.trim() || null,
       notes: notes || null,
       autoCreate: autoCreate ? 1 : 0,
     });
@@ -149,6 +154,9 @@ export default function RecurringFormModal({ isOpen, onClose, onSave, editItem }
 
   const showWeekendAdjust =
     recurrenceType !== 'once' && recurrenceType !== 'weekly' && recurrenceType !== 'biweekly';
+  // The amount is in the chosen account's currency (null = the budget's)
+  const amountCurrency = accounts.find((a) => a.id === accountId)?.currency ?? null;
+  const matchTextHelpId = useId();
 
   return (
     <Modal
@@ -175,7 +183,12 @@ export default function RecurringFormModal({ isOpen, onClose, onSave, editItem }
             <label className="block text-sm font-medium text-text-secondary mb-1">
               {amountType === 'variable' ? 'Estimated Amount' : 'Amount'}
             </label>
-            <CurrencyInput value={amount} onChange={setAmount} aria-label="Amount" />
+            <CurrencyInput
+              value={amount}
+              onChange={setAmount}
+              currency={amountCurrency}
+              aria-label="Amount"
+            />
           </div>
           <div>
             <label className="block text-sm font-medium text-text-secondary mb-1">Type</label>
@@ -231,7 +244,7 @@ export default function RecurringFormModal({ isOpen, onClose, onSave, editItem }
           </div>
           {amountType === 'variable' && (
             <p className="text-xs text-text-tertiary mt-1">
-              Amount is estimated — used for forecasting and matching, not an exact expectation.
+              Any amount — recognized by its payee or bank text.
             </p>
           )}
         </div>
@@ -298,6 +311,25 @@ export default function RecurringFormModal({ isOpen, onClose, onSave, editItem }
             Payee <span className="text-text-tertiary font-normal">(optional)</span>
           </label>
           <MerchantSelect value={payeeValue} onChange={setPayeeValue} label="Payee" />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-text-secondary mb-1">
+            Bank text contains <span className="text-text-tertiary font-normal">(optional)</span>
+          </label>
+          <Input
+            type="text"
+            value={matchText}
+            onChange={(e) => setMatchText(e.target.value)}
+            aria-label="Bank text contains"
+            aria-describedby={matchTextHelpId}
+            placeholder="e.g. ACME LTD PAYROLL"
+            maxLength={200}
+          />
+          <p id={matchTextHelpId} className="text-xs text-text-tertiary mt-1">
+            FlyBudget recognizes this item’s transactions by this text in the bank’s description,
+            for example ACME LTD PAYROLL.
+          </p>
         </div>
 
         <div>
