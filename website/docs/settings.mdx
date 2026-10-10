@@ -46,15 +46,33 @@ See [Backups and exports](./backups).
 | **Sidebar**         | **Pinned** (always open) or **Auto-hide** (collapsed, opens when you point at it). The pin at the top of the sidebar does the same. |
 | **Icons**           | Show or hide merchant, category and account icons.                                                                                  |
 | **Currency Symbol** | Up to 3 characters, like `$`, `€`, `£` or `EUR`. It only changes how amounts are shown, not their value.                            |
-| **Budget Currency** | Your budget's currency, like `EUR` or `USD`. Accounts in another currency are kept off budget.                                      |
+| **Budget Currency** | Your budget's currency, like `EUR` or `USD`. It's saved with your budget, so every device uses the same one.                        |
 | **Date Format**     | `Jan 5, 2026`, `01/05/2026`, `05/01/2026` or `2026-01-05`.                                                                          |
 
 <Screenshot name="dark-budget" alt="The budget in dark mode" />
 
 **Reset to defaults** puts them all back. Preferences are saved in your browser (or in the
-desktop app) rather than in your budget, so each device can have its own. Set **Budget Currency**
-the same on every device you use. Accounts in another currency are covered in
-[Accounts](./accounts#accounts-in-another-currency).
+desktop app) rather than in your budget, so each device can have its own. **Budget Currency** is
+the exception: it belongs to the budget. Changing it when you have accounts in other currencies is
+explained in [Accounts](./accounts#changing-your-budgets-currency).
+
+## Currencies
+
+Exchange rates for [accounts in another currency](./accounts#accounts-in-another-currency). For
+each currency your accounts use, it shows the latest rate, how many transactions are still waiting
+for one, and the rates FlyBudget has.
+
+- **Download daily exchange rates** gets the European Central Bank's daily rates, through
+  [Frankfurter](https://frankfurter.dev). It's off until you turn it on. FlyBudget then sends only
+  the currency codes and the dates it needs, never amounts or anything about your accounts. It
+  downloads what's missing when it starts, after a bank sync, when you add an account in another
+  currency, and when you choose **Update now**. The bank publishes rates for about 30 currencies
+  on working days; a weekend or holiday uses the last working day's rate.
+- **Add a rate** sets the rate for a date yourself. It applies from that date until the next rate,
+  and a download never replaces it. Use it for a currency the bank doesn't publish, or if you'd
+  rather not download rates. You can delete rates you added.
+
+The [demo](pathname:///demo/) can't download rates, but you can add them yourself.
 
 ## Server
 

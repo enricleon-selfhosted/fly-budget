@@ -12,9 +12,9 @@ account.
 
 The **Accounts** page shows your net worth over time, your assets and liabilities by kind, and
 every open account grouped by type, with its balance and how that group changed over the last
-month. The sidebar shows the same balances: **All accounts** is your net worth (leaving out
-[accounts in another currency](#accounts-in-another-currency)), **For budget** adds up the accounts
-your budget uses, and **Off budget** the rest.
+month. The sidebar shows the same balances: **All accounts** is your net worth, **For budget** adds
+up the accounts your budget uses, and **Off budget** the rest.
+[Accounts in another currency](#accounts-in-another-currency) count at the latest exchange rate.
 
 ## Adding an account
 
@@ -53,7 +53,7 @@ Money in **on-budget** accounts is money you plan with: its income counts toward
 [To Be Budgeted](./budgeting#to-be-budgeted) and its spending shows up in your categories.
 **Off-budget** accounts (investments, property, loans) still count toward your net worth, but
 their transactions stay out of the budget. Change it for any account with the **Off budget**
-box in its **Edit** dialog. Accounts in another currency are always off budget.
+box in its **Edit** dialog, including [accounts in another currency](#accounts-in-another-currency).
 
 Money can still move between the two. A [transfer](./transactions#transfers) between an on-budget
 account and an off-budget one counts in your budget when its on-budget side has a category.
@@ -64,40 +64,82 @@ Most accounts are in your budget's currency and don't need anything set. For an 
 different currency, choose its currency when you add the account, or in its **Edit** dialog. Your
 budget's currency is set in [Settings → Preferences](./settings#preferences).
 
-FlyBudget doesn't convert currencies, so these accounts are kept apart from the rest:
+FlyBudget converts these accounts' money into your budget's currency at an exchange rate:
 
-- They're always off budget, so their transactions stay out of your budget, except for transfers
-  whose budget side has a category (see [Transfers](./transactions#transfers)).
-- Their balances are left out of your net worth totals. They're shown on their own, in their own
-  currency.
-- Bank sync only links a bank account to an existing account in the same currency. Money that
-  moves between accounts in different currencies is an [exchange](./transactions#exchanges), a
-  kind of transfer.
+- **Each transaction is converted at its day's rate, and keeps it.** When rates move later, past
+  months stay as they were. Money [exchanged](./transactions#exchanges) into your budget's currency
+  is converted at exactly what arrived.
+- **Balances use the latest rate.** The account shows its balance in its own currency, and next to
+  it what that's worth in your budget's currency. Your net worth counts it the same way, and each
+  month of the [net worth report](./reports) uses that month's rate.
+- **Rates come from [Settings → Currencies](./settings#currencies).** FlyBudget can download the
+  European Central Bank's daily rates, if you turn that on, or you can enter rates yourself.
+- **A transaction without a rate isn't counted yet.** It stays out of your budget and reports
+  until there's a rate for its day, and the budget tells you how many are waiting.
 
-FlyBudget never adds up amounts in different currencies, because it has no exchange rates.
+You decide for each account whether it's in your budget:
+
+- **Off budget** is where a new account in another currency starts. Its transactions stay out of
+  your budget, and its money counts once you exchange it into your budget's currency (see
+  [Income in another currency](#income-in-another-currency)). Income and spending reports still
+  include its categorized transactions, converted.
+- **On budget** works like any other budget account. Its income adds to
+  [To Be Budgeted](./budgeting#to-be-budgeted) and its spending counts in your categories,
+  converted at each day's rate. Choose this if you spend from the account.
+
+Moving an account on or off budget removes the category from transfers between it and your other
+accounts that no longer cross the budget boundary, so the same money isn't counted twice. The
+**Edit** dialog warns you first.
+
+### Converting a transaction yourself
+
+Open a transaction in an account in another currency to see what it's worth in your budget's
+currency and where that came from: the day's rate, an exchange, or an amount you entered. If you
+were charged a different amount, for example a card payment your bank converted at its own rate,
+type the amount in your budget's currency instead. You can go back to the day's rate at any time.
+
+### Changing your budget's currency
+
+If you change your budget's currency in [Settings → Preferences](./settings#preferences), accounts
+already in the new currency become the budget's own, and accounts in the old currency keep it as
+their currency. No balance changes. FlyBudget converts everything again at the new rates, and
+amounts you entered by hand are cleared, because they were in the old currency.
 
 ## Income in another currency
 
 Say you're paid every week in pounds (GBP) into a GBP account at Revolut, and your budget is in
-euros (EUR). The GBP account is off budget, so the pay doesn't count toward
-[To Be Budgeted](./budgeting#to-be-budgeted) when it arrives. It counts once it reaches your euro
-account:
+euros (EUR). There are two ways to budget it. Pick the one that matches how you use the money.
+
+### You change the pounds into euros before spending them
+
+Keep the GBP account **off budget**. The pay counts for your budget once it reaches your euro
+account, exactly what you received:
 
 1. Add the Revolut account in GBP, with its currency set to GBP.
 2. When you change pounds into euros in Revolut, that's an exchange. FlyBudget records it as a
    transfer between the two accounts: the GBP side keeps the pounds that left, and the euro side
-   keeps the euros that arrived. The rate is the one implied by those two amounts.
+   keeps the euros that arrived.
 3. Give the euro side an income category, such as **Salary**. The euros now count toward To Be
-   Budgeted, exactly what you received. To do this automatically, add a [rule](./rules) that sets
-   the category when the bank's original text contains `Exchanged from GBP`.
+   Budgeted. To do this automatically, add a [rule](./rules) that sets the category when the bank's
+   original text contains `Exchanged from GBP`.
 
 If both accounts come from the same bank connection, FlyBudget can recognize the exchange from the
 bank's text. Otherwise, link the two sides yourself with **Link as transfer** (see
 [Linking by hand](./transactions#linking-by-hand)).
 
-The budget only sees money once it has arrived in euros. Spending paid straight from the GBP account
-isn't in your budget, because the budget doesn't convert pounds. To keep track of the weekly pay
-itself, add it as a [recurring transaction](./recurring#pay-in-another-currency) in the GBP account.
+### You also spend from the pound account
+
+Put the GBP account **on budget**. Each week's pay then counts toward To Be Budgeted when it
+arrives, converted at that day's rate, and what you pay from the account counts in your categories,
+converted the same way. Changing pounds into euros is then a transfer between two budget accounts,
+so it doesn't change your budget.
+
+The budget keeps the pay at the rate of the day it arrived. If you later change the pounds at a
+better or worse rate, the difference isn't counted. If that matters to you, add an adjustment for it
+with a category.
+
+To keep track of the weekly pay itself, add it as a [recurring transaction](./recurring#pay-in-another-currency)
+in the GBP account.
 
 ## An account's register
 

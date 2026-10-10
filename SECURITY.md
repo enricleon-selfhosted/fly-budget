@@ -117,7 +117,9 @@ Access tokens are never sent to the app's own UI, logs, or backup exports.
   programs and users on the same machine can't read your data.
 - **Outbound.** The only external services contacted are Plaid (the
   `plaid.com` API), your SimpleFIN bridge and Enable Banking
-  (`api.enablebanking.com`), always over HTTPS. SimpleFIN URLs are restricted to public HTTPS addresses (checked at
+  (`api.enablebanking.com`), always over HTTPS, and, only if you turn on
+  downloading exchange rates, Frankfurter (`api.frankfurter.dev`), which is sent
+  nothing but currency codes and dates. SimpleFIN URLs are restricted to public HTTPS addresses (checked at
   connection time), redirects are re-validated, and requests time out. Fonts and
   all other assets are bundled with the app; nothing is loaded from other sites.
 - **Content Security Policy.** The UI can only run code shipped with the app
