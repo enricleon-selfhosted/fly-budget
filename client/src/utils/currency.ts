@@ -22,7 +22,29 @@ const withCents = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 2,
 });
 
-export function formatCurrency(cents: number): string {
+const foreignFormatters = new Map<string, Intl.NumberFormat>();
+
+/** Amounts of an account in another currency than the budget's, e.g. "CHF 1,234.50" */
+function formatForeign(cents: number, currency: string): string {
+  let formatter = foreignFormatters.get(currency);
+  if (!formatter) {
+    try {
+      formatter = new Intl.NumberFormat('en-US', { style: 'currency', currency });
+    } catch {
+      // Not a currency this browser knows: show the code
+      return `${cents < 0 ? '-' : ''}${currency} ${withCents.format(Math.abs(cents) / 100)}`;
+    }
+    foreignFormatters.set(currency, formatter);
+  }
+  return formatter.format(cents / 100 || 0);
+}
+
+/**
+ * `currency` is an account's own currency (`Account.currency`): set only for accounts in another
+ * currency than the budget's. Without it, amounts use the budget's currency symbol.
+ */
+export function formatCurrency(cents: number, currency?: string | null): string {
+  if (currency) return formatForeign(cents, currency);
   const sym = getCurrencySymbol();
   const abs = Math.abs(cents);
   const formatted = (abs % 100 === 0 ? wholeDollars : withCents).format(abs / 100);
