@@ -9,6 +9,8 @@ export type SidebarMode = 'persistent' | 'auto-hide';
 interface PreferencesState {
   theme: Theme;
   currencySymbol: string;
+  /** ISO 4217 code of the budget's currency; null = not chosen yet (see utils/budgetCurrency.ts) */
+  currencyCode: string | null;
   dateFormat: DateFormatOption;
   savingsGoal: number;
   sidebarMode: SidebarMode;
@@ -25,6 +27,7 @@ interface PreferencesState {
   gettingStartedHidden: boolean;
   setTheme: (theme: Theme) => void;
   setCurrencySymbol: (symbol: string) => void;
+  setCurrencyCode: (code: string | null) => void;
   setDateFormat: (format: DateFormatOption) => void;
   setSavingsGoal: (goal: number) => void;
   setSidebarMode: (mode: SidebarMode) => void;
@@ -44,6 +47,7 @@ export const usePreferencesStore = create<PreferencesState>()(
     (set) => ({
       theme: 'light',
       currencySymbol: '$',
+      currencyCode: null,
       dateFormat: 'MMM d, yyyy',
       savingsGoal: 20,
       sidebarMode: 'persistent',
@@ -56,6 +60,7 @@ export const usePreferencesStore = create<PreferencesState>()(
       gettingStartedHidden: false,
       setTheme: (theme) => set({ theme }),
       setCurrencySymbol: (currencySymbol) => set({ currencySymbol }),
+      setCurrencyCode: (currencyCode) => set({ currencyCode }),
       setDateFormat: (dateFormat) => set({ dateFormat }),
       setSavingsGoal: (savingsGoal) => set({ savingsGoal }),
       setSidebarMode: (sidebarMode) => set({ sidebarMode }),
