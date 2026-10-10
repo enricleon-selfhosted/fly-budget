@@ -50,17 +50,22 @@ test.describe('accounts in another currency', () => {
     await expect(page.getByText(/Other currencies/)).toBeVisible();
   });
 
-  test('refuse a transfer to an account in another currency', async ({ api }) => {
+  test('a transfer to an account in another currency is an exchange with its own amount', async ({
+    api,
+  }) => {
     const eur = await api.createAccount('Everyday', 0);
-    const usd = await api.createAccount('Dollar pocket', 0, 'checking', { currency: 'USD' });
-    await expect(
-      api.call('POST', '/transactions/transfer', {
-        fromAccountId: eur.id,
-        toAccountId: usd.id,
-        date: '2026-01-15',
-        amount: 1_000,
-      }),
-    ).rejects.toThrow(/same currency/);
+    const chf = await api.createAccount('Franc pocket', 0, 'checking', { currency: 'CHF' });
+    const exchange = {
+      fromAccountId: eur.id,
+      toAccountId: chf.id,
+      date: '2026-01-15',
+      amount: 1_000,
+    };
+    await expect(api.call('POST', '/transactions/transfer', exchange)).rejects.toThrow(
+      /amount received/,
+    );
+    const pair = await api.call('POST', '/transactions/transfer', { ...exchange, toAmount: 940 });
+    expect(pair.map((t: { amount: number }) => t.amount)).toEqual([-1_000, 940]);
   });
 });
 
