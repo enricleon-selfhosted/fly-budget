@@ -6,6 +6,7 @@ import { useIsPhone } from '../../hooks/useIsPhone';
 import { usePreferencesStore } from '../../store/preferencesStore';
 import { useUndoKeyboard } from '../../hooks/useUndoKeyboard';
 import { UndoToast } from '../ui/UndoToast';
+import { BudgetCurrencySync } from '../settings/BudgetCurrencySync';
 import { ConnectionBanner } from '../connection/ConnectionBanner';
 import { DemoBanner } from '../demo/DemoBanner';
 import { Sidebar, SidebarDrawer } from './Sidebar';
@@ -30,10 +31,19 @@ export function AppShell() {
     return <Navigate to="/welcome" replace />;
   }
 
-  if (isPhone) return <PhoneShell />;
+  // Keeps the budget's currency in step with the server (renders nothing)
+  if (isPhone) {
+    return (
+      <>
+        <BudgetCurrencySync />
+        <PhoneShell />
+      </>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-page overflow-hidden">
+      <BudgetCurrencySync />
       <Sidebar />
       <div className="flex-1 min-w-0 flex flex-col">
         <DemoBanner />

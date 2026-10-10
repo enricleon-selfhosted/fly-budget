@@ -5,7 +5,9 @@ import { Plus, Building2, Link2, ChevronDown, ChevronRight } from 'lucide-react'
 import { useAccounts } from '../../hooks/useAccounts';
 import { usePlaidStatus } from '../../hooks/usePlaid';
 import { formatCurrency } from '../../utils/currency';
+import { totalInBudget, valueInBudget } from '../../utils/accountValues';
 import { AddAccountModal } from '../accounts/AddAccountModal';
+import { BudgetValue } from '../accounts/BudgetValue';
 import { ConnectBankModal } from '../plaid/ConnectBankModal';
 import { PlaidSetupModal } from '../plaid/PlaidSetupModal';
 import { SimplefinConnectModal } from '../simplefin/SimplefinConnectModal';
@@ -35,10 +37,13 @@ function AccountRow({ account }: { account: Account }) {
           </span>
         )}
       </span>
-      <span
-        className={`ml-2 tabular-nums text-[11px] shrink-0 ${isNegative ? 'text-negative/80' : 'text-sidebar-text/50'}`}
-      >
-        {formatCurrency(account.balance, account.currency)}
+      <span className="ml-2 shrink-0 flex flex-col items-end">
+        <span
+          className={`tabular-nums text-[11px] ${isNegative ? 'text-negative/80' : 'text-sidebar-text/50'}`}
+        >
+          {formatCurrency(account.balance, account.currency)}
+        </span>
+        <BudgetValue account={account} tone="sidebar" className="tabular-nums text-[10px]" />
       </span>
     </NavLink>
   );
@@ -99,13 +104,11 @@ export function SidebarAccountList() {
 
   const onBudget = accounts.filter((a) => a.isOffBudget === 0);
   const offBudget = accounts.filter((a) => a.isOffBudget === 1);
-  // Totals add up one currency: accounts in another currency are shown in theirs, not added here
-  const inBudgetCurrency = accounts.filter((a) => a.currency === null);
-  const allTotal = inBudgetCurrency.reduce((sum, a) => sum + a.balance, 0);
-  const onBudgetTotal = onBudget.reduce((sum, a) => sum + a.balance, 0);
-  const offBudgetTotal = offBudget
-    .filter((a) => a.currency === null)
-    .reduce((sum, a) => sum + a.balance, 0);
+  // Totals are in the budget's currency: an account in another currency counts at its balance at
+  // the latest rate, and one without a rate is left out (utils/accountValues.ts)
+  const allTotal = totalInBudget(accounts);
+  const onBudgetTotal = totalInBudget(onBudget);
+  const offBudgetTotal = totalInBudget(offBudget);
 
   return (
     <>
@@ -153,7 +156,7 @@ export function SidebarAccountList() {
             >
               <span>Off budget</span>
               <span className="flex items-center gap-1">
-                {offBudget.some((a) => a.currency === null) && (
+                {offBudget.some((a) => valueInBudget(a) !== null) && (
                   <span className="tabular-nums text-[12px]">{formatCurrency(offBudgetTotal)}</span>
                 )}
                 {offBudgetOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
