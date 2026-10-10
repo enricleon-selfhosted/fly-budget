@@ -21,18 +21,18 @@ Status: ☐ to do · ◐ in progress · ☑ done · ⏸ deferred. Owner: **lead*
 | 1.2 | `matching.ts` pure decisions + property tests               | lead  | ☑      |
 | 1.3 | `importStore.ts` (interface + SQLite)                       | lead  | ☑      |
 | 1.4 | `importTransactions.ts` + tests through its public function | lead  | ☑      |
-| 1.5 | `BankDataSource` contract test suite                        | lead  | ☐      |
+| 1.5 | `BankDataSource` contract test suite                        | lead  | ☑      |
 
 ## Phase 2 — Enable Banking adapter (`services/enableBanking/`)
 
 | #   | Task                                                               | Owner | Status |
 | --- | ------------------------------------------------------------------ | ----- | ------ |
-| 2.1 | `jwt.ts` + tests                                                   | lead  | ☐      |
-| 2.2 | `schemas.ts`, `errors.ts`                                          | lead  | ☐      |
-| 2.3 | `client.ts` (fetch injected) + tests                               | lead  | ☐      |
-| 2.4 | `mapping.ts` pure + property tests                                 | lead  | ☐      |
-| 2.5 | `dataSource.ts` + contract suite                                   | lead  | ☐      |
-| 2.6 | `consent.ts` + tests                                               | lead  | ☐      |
+| 2.1 | `jwt.ts` + tests                                                   | lead  | ☑      |
+| 2.2 | `schemas.ts`, `errors.ts`                                          | lead  | ☑      |
+| 2.3 | `client.ts` (fetch injected) + tests                               | lead  | ☑      |
+| 2.4 | `mapping.ts` pure + property tests                                 | lead  | ☑      |
+| 2.5 | `dataSource.ts` + contract suite                                   | lead  | ☑      |
+| 2.6 | `consent.ts` + tests                                               | lead  | ☑      |
 | 2.7 | `store.ts`                                                         | lead  | ☐      |
 | 2.8 | `connectService.ts`, `accountMapping.ts`, `syncService.ts` + tests | lead  | ☐      |
 
