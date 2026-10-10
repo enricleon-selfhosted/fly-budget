@@ -201,6 +201,22 @@ export interface Transaction {
   scheduleId: string | null;
   createdAt: string;
   children?: Transaction[];
+  /** A transfer's other side: its account (in the transactions list) */
+  transferAccountId?: string;
+  /** …and its amount, which differs from this side's in an exchange between currencies */
+  transferAmount?: number;
+}
+
+/** A transaction "Link as transfer" offers as the other side */
+export interface TransferCandidate {
+  id: string;
+  accountId: string;
+  accountName: string;
+  /** The account's currency when it isn't the budget's */
+  currency: string | null;
+  date: string;
+  amount: number;
+  payeeName: string | null;
 }
 
 export interface ImportPreviewRow {
@@ -565,6 +581,8 @@ export interface Schedule {
   categoryId: string | null;
   payeeId: string | null;
   notes: string | null;
+  /** Bank text that recognizes this item's transactions (case-insensitive "contains") */
+  matchText: string | null;
   status: ScheduleStatus;
   autoCreate: number;
   autoCreateFrom: string | null;
@@ -633,6 +651,8 @@ export interface MatchSuggestion {
   expectedAmount: number;
   candidates: {
     transactionId: string;
+    /** Amounts are in this account's currency */
+    accountId: string;
     date: string;
     amount: number;
     payeeName: string | null;
@@ -868,7 +888,10 @@ export interface EnableBankingSyncResult {
   aspspName: string;
   added: number;
   matched: number;
+  /** Includes exchanges between currencies at the same bank */
   transfers: number;
+  /** Matched to an occurrence of a recurring item */
+  recurring: number;
   status: EnableBankingSyncStatus;
   errors: string[];
 }

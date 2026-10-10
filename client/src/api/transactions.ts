@@ -1,5 +1,10 @@
 import { apiFetch } from './client';
-import type { Transaction, TransactionQueryParams, ImportPreviewRow } from '../types';
+import type {
+  Transaction,
+  TransactionQueryParams,
+  ImportPreviewRow,
+  TransferCandidate,
+} from '../types';
 
 export interface SplitItem {
   categoryId: string | null;
@@ -28,6 +33,10 @@ export interface CreateTransferData {
   toAccountId: string;
   date: string;
   amount: number;
+  /** What arrives when the accounts' currencies differ (an exchange) */
+  toAmount?: number;
+  /** Only for the budget side of a transfer with an off-budget account (money in or out of the budget) */
+  categoryId?: string | null;
   notes?: string | null;
 }
 
@@ -64,6 +73,17 @@ export const updateTransaction = (id: string, data: Partial<CreateTransactionDat
 
 export const deleteTransaction = (id: string) =>
   apiFetch<void>(`/transactions/${id}`, { method: 'DELETE' });
+
+/** Transactions in the user's other accounts that could be this one's other side */
+export const getTransferCandidates = (id: string) =>
+  apiFetch<TransferCandidate[]>(`/transactions/${id}/transfer-candidates`);
+
+/** Two existing transactions become one transfer (an exchange across currencies) */
+export const linkTransfer = (id: string, otherId: string) =>
+  apiFetch<Transaction>(`/transactions/${id}/link-transfer`, {
+    method: 'POST',
+    body: JSON.stringify({ otherId }),
+  });
 
 /** Turns a transfer back into two ordinary transactions */
 export const unlinkTransfer = (id: string) =>
