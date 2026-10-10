@@ -8,6 +8,8 @@ export const createAccount = (data: {
   type: AccountType;
   startingBalance: number;
   isOffBudget?: number;
+  /** Only for an account in another currency than the budget's */
+  currency?: string | null;
 }) => apiFetch<Account>('/accounts', { method: 'POST', body: JSON.stringify(data) });
 
 export const updateAccount = (
@@ -17,6 +19,7 @@ export const updateAccount = (
     type: AccountType;
     startingBalance: number;
     isOffBudget: number;
+    currency: string | null;
     logo: string | null;
   }>,
 ) => apiFetch<Account>(`/accounts/${id}`, { method: 'PUT', body: JSON.stringify(data) });

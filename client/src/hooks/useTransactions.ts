@@ -129,6 +129,21 @@ export function useDeleteTransaction() {
   });
 }
 
+/** Turns a transfer back into two transactions; the payees and budget figures change with it */
+export function useUnlinkTransfer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => txApi.unlinkTransfer(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['transactions'] });
+      qc.invalidateQueries({ queryKey: ['accounts'] });
+      qc.invalidateQueries({ queryKey: ['payees'] });
+      qc.invalidateQueries({ queryKey: ['budget'] });
+      qc.invalidateQueries({ queryKey: ['budget-summary'] });
+    },
+  });
+}
+
 export function useReconcileAccount() {
   const qc = useQueryClient();
   return useMutation({

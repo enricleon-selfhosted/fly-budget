@@ -297,6 +297,11 @@ export interface Account {
   closedAt: string | null;
   /** Custom logo image (data URL); null = colored initials */
   logo: string | null;
+  /**
+   * ISO 4217 code when the account is in another currency than the budget's (null = the budget
+   * currency). Such accounts stay off budget and out of net worth totals.
+   */
+  currency: string | null;
   createdAt: string;
   balance: number;
 }
@@ -765,5 +770,105 @@ export interface SimplefinSyncResult {
   connectionId: string;
   connectionName: string;
   added: number;
+  errors: string[];
+}
+
+// Enable Banking (European banks) — HTTP contract in docs/enable-banking/api.md
+export type EnableBankingSyncStatus = 'good' | 'syncing' | 'error' | 'reauth_required';
+
+export interface EnableBankingStatus {
+  configured: boolean;
+  applicationId: string | null;
+  environment: 'PRODUCTION' | 'SANDBOX' | null;
+  redirectUrl: string | null;
+  /** This server's callback URL, as the browser reached it */
+  suggestedRedirectUrl: string;
+  connectionCount: number;
+}
+
+export interface EnableBankingConfigInput {
+  applicationId: string;
+  /** PEM text; omit to keep the stored key */
+  privateKey?: string;
+  redirectUrl: string;
+}
+
+export interface EnableBankingAspsp {
+  name: string;
+  country: string;
+  maximumConsentDays: number | null;
+  beta: boolean;
+  psuTypes: string[];
+}
+
+/** A bank account in a connection, and the FlyBudget account it imports into */
+export interface EnableBankingAccount {
+  id: string;
+  name: string;
+  ibanMask: string | null;
+  currency: string | null;
+  cashAccountType: string | null;
+  suggestedType: AccountType;
+  /** null = not imported (new, or ignored when isEnabled is false) */
+  accountId: string | null;
+  accountName: string | null;
+  isEnabled: boolean;
+  syncFrom: string | null;
+  /** The latest balance the bank reported, in cents */
+  bankBalance: number | null;
+  bankBalanceAt: string | null;
+  /** FlyBudget's balance of the linked account */
+  balance: number | null;
+}
+
+export interface EnableBankingConnection {
+  id: string;
+  aspspName: string;
+  aspspCountry: string;
+  validUntil: string;
+  syncStatus: EnableBankingSyncStatus;
+  syncError: string | null;
+  lastSyncedAt: string | null;
+  accounts: EnableBankingAccount[];
+}
+
+export interface EnableBankingConsentResult {
+  connectionId: string;
+  renewed: boolean;
+  accounts: EnableBankingAccount[];
+}
+
+export type EnableBankingConsentStatus =
+  | { status: 'pending' }
+  | { status: 'expired' }
+  | { status: 'error'; error: string }
+  | { status: 'complete'; result: EnableBankingConsentResult };
+
+export type EnableBankingMappingAction =
+  | {
+      id: string;
+      action: 'create';
+      accountName?: string;
+      accountType?: AccountType;
+      isOffBudget?: number;
+      syncFrom?: string;
+    }
+  | { id: string; action: 'link'; accountId: string; syncFrom?: string }
+  | { id: string; action: 'skip' };
+
+export interface EnableBankingMappingResult {
+  created: number;
+  linked: number;
+  skipped: number;
+  errors: { id: string; error: string }[];
+}
+
+export interface EnableBankingSyncResult {
+  connectionId: string;
+  aspspName: string;
+  added: number;
+  matched: number;
+  transfers: number;
+  status: EnableBankingSyncStatus;
   errors: string[];
 }
