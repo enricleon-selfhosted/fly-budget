@@ -127,6 +127,24 @@ test("bank connections can't be set up in the demo", async ({ page }) => {
   expect(status).toBe(403);
 });
 
+test('exchange rates can be typed in, but not downloaded, in the demo', async ({ page }) => {
+  await openDemo(page, '/settings?tab=currencies');
+  await expect(
+    page.getByRole('checkbox', { name: 'Download daily exchange rates' }),
+  ).toBeDisabled();
+  const status = await page.evaluate(
+    async () =>
+      (
+        await fetch('/api/currencies', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ downloadRates: true }),
+        })
+      ).status,
+  );
+  expect(status).toBe(403);
+});
+
 test('the payment waiting to be matched can be confirmed', async ({ page }) => {
   await openDemo(page, '/recurring');
   await page.getByRole('button', { name: 'Review now' }).click();
