@@ -84,8 +84,10 @@ categories](./payees#default-categories).
 
 <Screenshot name="rules-apply" alt="Choosing which past transactions to change" dialog />
 
-Reconciled transactions, transfers and splits are never changed by rules, and neither are
-balance adjustments.
+Reconciled transactions, transfers and splits are never changed when you apply rules to past
+transactions, and neither are balance adjustments. New bank transactions get your rules before
+FlyBudget links them as a transfer, so a rule can still give the budget side of an exchange its
+category (for example, bank text contains "Exchanged from GBP" → Salary).
 
 ## What rules don't overwrite
 
