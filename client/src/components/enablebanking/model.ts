@@ -320,11 +320,17 @@ export function plural(n: number, word: string): string {
 
 /** What a sync brought in, one line per kind that happened */
 export function describeSync(
-  result: Pick<EnableBankingSyncResult, 'added' | 'matched' | 'transfers'>,
+  result: Pick<EnableBankingSyncResult, 'added' | 'matched' | 'transfers'> & { recurring?: number },
 ): string[] {
   const lines = [`${plural(result.added, 'new transaction')} imported`];
   if (result.matched > 0) {
     lines.push(`${plural(result.matched, 'transaction')} matched to ones you entered`);
+  }
+  // Optional: older callers and results don't carry it
+  const recurring = result.recurring ?? 0;
+  if (recurring > 0) {
+    const item = recurring === 1 ? 'a recurring item' : 'recurring items';
+    lines.push(`${plural(recurring, 'transaction')} matched to ${item}`);
   }
   if (result.transfers > 0) {
     lines.push(`${plural(result.transfers, 'transfer')} linked between your accounts`);

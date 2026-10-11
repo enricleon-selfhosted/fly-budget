@@ -32,13 +32,16 @@ services/enableBanking/            provider adapter
 ──────────────────────────────────────────────────────────────────────────────────────
 services/bankSync/                 provider-agnostic core (D3)
   types.ts                         RemoteTransaction, RemoteBalance, BankDataSource
-  matching.ts                      pure: manual-match and transfer-counterpart (same currency
-                                   only) decisions
+  matching.ts                      pure: manual-match, transfer-counterpart (same currency only)
+                                   and exchange decisions
   importStore.ts                   ImportStore interface + SQLite implementation
-  importTransactions.ts            dedup → match → insert (rules) → transfer, per account
+  importTransactions.ts            dedup → match → insert (rules) → transfer or exchange →
+                                   recurring items, per account
 ──────────────────────────────────────────────────────────────────────────────────────
 services/ruleService.ts            insertNewTransaction (rules, payees) — unchanged
-services/transactionHelpers.ts     linkTransfer / unlinkTransfer (new, shared)
+services/transactionHelpers.ts     linkTransfer / unlinkTransfer (new), next to the transactions
+                                   API's transfer writes (createTransfer, updateTransferSide)
+services/matchingEngine.ts         autoMatchImported: recurring items paid by imports (D29)
 services/accountService.ts         createAccount, setBalanceTo, openAccount, accountSummary
                                    (shared with the accounts API)
 utils/money.ts                     exact decimal string → hundredths (D12), shared
@@ -77,19 +80,20 @@ type ImportTarget = {
 };
 type ImportContext = {
   ownAccountsByIbanHash: Map<string, string>; // IBAN hash → local account id
+  exchangePartners?: Map<string, string>; // the connection's accounts → their currencies (D27)
   store?: ImportStore; // default: SQLite
 };
 function importTransactions(target, remote: RemoteTransaction[], ctx): ImportResult;
-// ImportResult = { added, matched, transfers, duplicates, otherCurrency }
+// ImportResult = { added, matched, transfers, recurring, duplicates, otherCurrency }
 ```
 
 `ImportStore` is the only thing the import core uses to read or write the database (run one
-account's import as a single transaction, look up an
-imported id, find manual-match and transfer candidates, attach an import to a row, insert through
-`insertNewTransaction`, link a transfer, read an account's stored currency). Transfer candidates
-come back in any currency with their own; the decisions themselves (`pickManualMatch`, and
-`pickTransferCounterpart`, which pairs only the same currency) are pure functions in
-`matching.ts`.
+account's import as a single transaction, look up an imported id, find manual-match, transfer and exchange candidates, attach an import to a row,
+insert through `insertNewTransaction`, link a transfer, read an account's stored currency, match
+recurring items). Transfer candidates come back in any currency with their own; the decisions
+themselves (`pickManualMatch`, `pickTransferCounterpart`, which pairs only the same currency,
+`pickExchangeCounterpart`, and `exchangeSiblings`, which counts the other transactions that could
+be the same exchange) are pure functions in `matching.ts`.
 
 ## Data model (migration `0021_enable_banking`, hand-written like `0019`/`0020`)
 
@@ -177,7 +181,11 @@ importTransactions(target, remote, ctx):          one database transaction
     imported id already in the account          → skip (duplicate)
     manual row, same amount, ±10 days            → attach import to it ("matched", D5)
     else insertNewTransaction (rules, payees)    → "added"
-         then pickTransferCounterpart            → linkTransfer ("transfers", D6), same currency only
+  then, for each new row (after the whole batch is in):
+    pickTransferCounterpart                      → linkTransfer ("transfers", D6), same currency only
+    else pickExchangeCounterpart (same bank,     → linkTransfer (counted in "transfers", D27)
+         exchangeSiblings = 0)
+  autoMatchImported(new rows)                    → recurring occurrences paid ("recurring", D29)
 balance = dataSource.fetchBalance()
 the account's last_synced_at = this sync's start
   opening_balance_pending → starting balance = balance − imported sum up to the balance's

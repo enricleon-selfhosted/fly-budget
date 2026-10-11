@@ -25,7 +25,9 @@ Each row is a category. Income categories come first, then expense categories gr
 For each category you see:
 
 - **Planned**: how much you expect to earn or spend this month.
-- **Actual**: what came in or went out this month, from your on-budget accounts.
+- **Actual**: what came in or went out this month, from your on-budget accounts. Transfers with an
+  off-budget account count here when their budget side has a category (see
+  [Transfers and your budget](#transfers-and-your-budget)).
 - **Remaining**: what's left. For spending it's green while you're within the plan and red once
   you're over; for income it's what you still expect to receive.
 
@@ -68,7 +70,24 @@ Below it, **Summary**, **Income** and **Expenses** tabs compare what you planned
 actually happened this month.
 
 Only on-budget accounts count. Investments, property and loans appear in your net worth but not
-here (see [Accounts](./accounts#on-budget-and-off-budget)).
+here (see [Accounts](./accounts#on-budget-and-off-budget)). Money from them reaches the budget only
+through a transfer with a category, described below.
+
+## Transfers and your budget
+
+Moving money between two accounts in your budget, such as checking to savings, doesn't change
+To Be Budgeted. It's still your money, and the transfer has no category.
+
+Moving money between an on-budget account and an off-budget one does change it, so the budget side
+of the transfer can have a category:
+
+- **Money coming in** gets an income category. For example, a withdrawal from savings you track off
+  budget, or the euros from an exchange (see
+  [Income in another currency](./accounts#income-in-another-currency)). It adds to To Be Budgeted.
+- **Money going out** gets a spending category. For example, a contribution to an investment
+  account. It counts as spending in that category.
+
+Reports count these transfers like any other income or spending in that category.
 
 ## A category's page
 

@@ -72,7 +72,8 @@ export function pickTransferCounterpart(
   const eligible = candidates.filter(
     (c) =>
       c.accountId !== query.accountId &&
-      // A transfer moves one amount between two accounts, so both must be in one currency
+      // One amount on both sides only within a currency, like `sameCurrency` in
+      // utils/transferRules.ts; across currencies it's an exchange (pickExchangeCounterpart)
       c.currency === query.currency &&
       c.amount === -query.amount &&
       daysBetween(c.date, query.date) <= TRANSFER_WINDOW_DAYS,
@@ -89,4 +90,91 @@ export function pickTransferCounterpart(
   }
 
   return eligible.length === 1 && query.siblings === 0 ? eligible[0].id : null;
+}
+
+/** The two sides of a currency exchange book on the same day, or the next */
+export const EXCHANGE_WINDOW_DAYS = 1;
+
+/** Whether bank text names a currency, e.g. "Exchanged to EUR" names EUR (not "Eurostar") */
+export function mentionsCurrency(text: string, currency: string): boolean {
+  return new RegExp(`(^|[^A-Za-z])${currency}([^A-Za-z]|$)`, 'i').test(text);
+}
+
+export type ExchangeCandidate = {
+  id: string;
+  accountId: string;
+  date: string;
+  amount: number;
+  /** The bank's text for it (imported payee and notes) */
+  text: string;
+};
+
+export type ExchangeQuery = {
+  accountId: string;
+  /** This account's currency */
+  currency: string;
+  date: string;
+  amount: number;
+  text: string;
+  /** The user's other accounts at the same bank, with their currencies */
+  partners: ReadonlyMap<string, string>;
+  /** Other unlinked transactions in this account that could be the same exchange */
+  siblings: number;
+};
+
+/**
+ * The other side of a currency exchange at the same bank (decision D27): an account in another
+ * currency, the opposite direction, at most a day apart, and the bank text of each side naming the
+ * other side's currency ("Exchanged to EUR" / "Exchanged from GBP"): one side alone could be a card
+ * payment abroad ("CAFE PARIS 14.00 EUR"). It must be the only candidate, and this the only
+ * transaction here that could be it. Anything ambiguous: null (the user can link it by hand).
+ */
+export function pickExchangeCounterpart(
+  query: ExchangeQuery,
+  candidates: ExchangeCandidate[],
+): string | null {
+  if (query.amount === 0 || query.siblings > 0) return null;
+  const eligible = candidates.filter((c) => {
+    const currency = query.partners.get(c.accountId);
+    return (
+      currency !== undefined &&
+      c.accountId !== query.accountId &&
+      currency !== query.currency &&
+      c.amount !== 0 &&
+      Math.sign(c.amount) === -Math.sign(query.amount) &&
+      daysBetween(c.date, query.date) <= EXCHANGE_WINDOW_DAYS &&
+      mentionsCurrency(query.text, currency) &&
+      mentionsCurrency(c.text, query.currency)
+    );
+  });
+  return eligible.length === 1 ? eligible[0].id : null;
+}
+
+/**
+ * How many other transactions in this account (`here`, around the same date) could be the same
+ * exchange as transaction `id`: the same direction, and bank text naming another currency at the
+ * bank. Any of them makes pairing it a guess.
+ */
+export function exchangeSiblings(
+  here: readonly ExchangeCandidate[],
+  id: string,
+  amount: number,
+  currency: string,
+  partners: ReadonlyMap<string, string>,
+): number {
+  return here.filter(
+    (c) =>
+      c.id !== id &&
+      Math.sign(c.amount) === Math.sign(amount) &&
+      looksLikeExchange(c.text, currency, partners),
+  ).length;
+}
+
+/** Whether a transaction's text names any of the other currencies at its bank */
+export function looksLikeExchange(
+  text: string,
+  currency: string,
+  partners: ReadonlyMap<string, string>,
+): boolean {
+  return [...partners.values()].some((c) => c !== currency && mentionsCurrency(text, c));
 }

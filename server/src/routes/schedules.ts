@@ -20,6 +20,7 @@ import {
   dismissMatchSuggestion,
   getMatchSuggestions,
 } from '../services/matchingEngine.js';
+import { MAX_DATE_FLEXIBILITY } from '../services/scheduleMatching.js';
 
 export const schedulesRouter = Router();
 
@@ -74,12 +75,14 @@ const scheduleFields = {
   startDate: isoDate,
   endDate: isoDate.nullable().optional(),
   weekendAdjust: weekendAdjustEnum,
-  dateFlexibility: z.number().int().min(0).max(14),
+  dateFlexibility: z.number().int().min(0).max(MAX_DATE_FLEXIBILITY),
   accountId: id.nullable().optional(),
   transferAccountId: id.nullable().optional(),
   categoryId: id.nullable().optional(),
   payeeId: id.nullable().optional(),
   notes: z.string().max(5_000).nullable().optional(),
+  /** Bank text that identifies this item's transactions, e.g. "ACME LTD PAYROLL" */
+  matchText: z.string().trim().max(200).nullable().optional(),
   status: statusEnum,
   autoCreate: z.number().int().min(0).max(1),
 };
@@ -300,6 +303,7 @@ schedulesRouter.post('/', (req, res) => {
     categoryId: data.categoryId ?? null,
     payeeId: data.payeeId ?? null,
     notes: data.notes ?? null,
+    matchText: data.matchText || null,
     status: data.status,
     autoCreate: data.autoCreate,
     autoCreateFrom: data.autoCreate ? today : null,

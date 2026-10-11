@@ -158,7 +158,10 @@ export function TransactionRow({
               <span className="text-sm">Split ({tx.children!.length})</span>
             </button>
           ) : isTransfer ? (
-            <span className="text-sm text-brand-500">Transfer</span>
+            // The budget side of money moving in or out of the budget can have a category (D26)
+            <span className="text-sm text-brand-500 truncate">
+              {categoryEntry ? `Transfer · ${categoryEntry.name}` : 'Transfer'}
+            </span>
           ) : (
             <>
               <button

@@ -54,8 +54,10 @@ export type ImportResult = {
   added: number;
   /** Imports merged into a transaction the user had typed in */
   matched: number;
-  /** New transactions linked to their other side in another account */
+  /** New transactions linked to their other side in another account (or exchange) */
   transfers: number;
+  /** New transactions matched to an occurrence of a recurring item */
+  recurring: number;
   /** Already imported earlier */
   duplicates: number;
   /** In another currency than the account's */

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Lock, Trash2, Repeat, Unlink, Wand2 } from 'lucide-react';
+import { X, Lock, Trash2, Repeat, Unlink, Wand2, Link2 } from 'lucide-react';
 import {
   useUpdateTransaction,
   useDeleteTransaction,
@@ -9,6 +9,7 @@ import { useSchedules, useUnmatchByTransaction } from '../../hooks/useSchedules'
 import { useCanSave } from '../../hooks/useConnection';
 import { SavingPausedHint } from '../connection/SavingPausedHint';
 import { CategoryPicker } from './CategoryPicker';
+import { LinkTransferModal } from './LinkTransferModal';
 import { PayeeCombobox } from './PayeeCombobox';
 import { Button } from '../ui/Button';
 import { ConfirmModal } from '../ui/ConfirmModal';
@@ -19,6 +20,14 @@ import { useUpdatePayee } from '../../hooks/usePayees';
 import { usePreferencesStore } from '../../store/preferencesStore';
 import { AccountIcon } from '../accounts/AccountIcon';
 import { formatCurrency } from '../../utils/currency';
+import { accountCurrency, useBudgetCurrency } from '../../utils/budgetCurrency';
+import {
+  budgetSideHint,
+  budgetSideTakesCategory,
+  canLinkAsTransfer,
+  exchangeLabel,
+  isExchange,
+} from '../../utils/transfers';
 import { RECURRENCE_TYPE_LABELS } from '../../types';
 import type {
   Transaction,
@@ -57,8 +66,10 @@ export function TransactionDetailPanel({
   const deleteTx = useDeleteTransaction();
   const unlinkTransferTx = useUnlinkTransfer();
   const canSave = useCanSave();
+  const budgetCode = useBudgetCurrency();
+  const thisAccount = accounts.find((a) => a.id === tx.accountId);
   // The account's own currency when it isn't the budget's (null = the budget's)
-  const currency = accounts.find((a) => a.id === tx.accountId)?.currency ?? null;
+  const currency = thisAccount?.currency ?? null;
   const showCategoryIcons = usePreferencesStore((s) => s.showCategoryIcons);
   const { data: schedules = [] } = useSchedules();
   const unmatchByTx = useUnmatchByTransaction();
@@ -70,6 +81,7 @@ export function TransactionDetailPanel({
   const [localPayee, setLocalPayee] = useState({ id: tx.payeeId, name: tx.payeeName ?? '' });
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showLink, setShowLink] = useState(false);
   const [ruleDraft, setRuleDraft] = useState<RuleInput | null>(null);
   const ruleModal = useModalValue(ruleDraft);
 
@@ -84,16 +96,52 @@ export function TransactionDetailPanel({
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape' && !showCategoryPicker && !showDeleteConfirm && !ruleDraft) onClose();
+      if (
+        e.key === 'Escape' &&
+        !showCategoryPicker &&
+        !showDeleteConfirm &&
+        !ruleDraft &&
+        !showLink
+      )
+        onClose();
     }
     document.addEventListener('keydown', handleKey);
     return () => document.removeEventListener('keydown', handleKey);
-  }, [onClose, showCategoryPicker, showDeleteConfirm, ruleDraft]);
+  }, [onClose, showCategoryPicker, showDeleteConfirm, ruleDraft, showLink]);
 
   const isReconciled = tx.reconciled === 1;
   const isTransfer = !!tx.transferTransactionId;
   const isSplitParent = tx.isParent === 1 && tx.children && tx.children.length > 0;
-  const canEditCategory = !isReconciled && !isTransfer && !isSplitParent;
+  // A transfer's other side: its account and amount (in the transactions list)
+  const otherAccount = tx.transferAccountId
+    ? accounts.find((a) => a.id === tx.transferAccountId)
+    : undefined;
+  // On a transfer, only the on-budget side can have a category, and only with an off-budget
+  // account (D26)
+  const budgetSide =
+    isTransfer &&
+    !!thisAccount &&
+    !!otherAccount &&
+    budgetSideTakesCategory(thisAccount, otherAccount);
+  const canEditCategory = !isReconciled && !isSplitParent && (!isTransfer || budgetSide);
+  // Plain transactions can be paired with the matching one in another account
+  const canLink = canLinkAsTransfer(tx);
+
+  // Across currencies a transfer shows both sides; the side money left comes first (D25)
+  let exchangeText: string | null = null;
+  const otherAmount = tx.transferAmount;
+  if (
+    isTransfer &&
+    thisAccount &&
+    otherAccount &&
+    otherAmount !== undefined &&
+    isExchange(thisAccount, otherAccount)
+  ) {
+    const thisSide = { cents: tx.amount, code: accountCurrency(thisAccount, budgetCode) };
+    const otherSide = { cents: otherAmount, code: accountCurrency(otherAccount, budgetCode) };
+    exchangeText =
+      tx.amount < 0 ? exchangeLabel(thisSide, otherSide) : exchangeLabel(otherSide, thisSide);
+  }
 
   const payeeName = tx.payeeName || (isTransfer ? 'Transfer' : '—');
   const payee = tx.payeeId ? payees.find((p) => p.id === tx.payeeId) : undefined;
@@ -199,6 +247,10 @@ export function TransactionDetailPanel({
           </span>
         </div>
 
+        {exchangeText && (
+          <p className="-mt-3 text-xs text-right tabular-nums text-text-tertiary">{exchangeText}</p>
+        )}
+
         {isReconciled && (
           <div className="flex items-center gap-2 px-3 py-2 bg-surface-alt rounded-lg text-text-tertiary text-xs">
             <Lock size={12} />
@@ -245,33 +297,38 @@ export function TransactionDetailPanel({
                 );
               })}
             </div>
-          ) : isTransfer ? (
+          ) : isTransfer && !budgetSide ? (
             <div className="text-sm text-brand-500 px-3 py-2 border border-border rounded-lg bg-surface-alt">
               Transfer
             </div>
           ) : (
-            <div className="relative">
-              <button
-                onClick={() => canEditCategory && setShowCategoryPicker(!showCategoryPicker)}
-                disabled={isReconciled}
-                className={`${inputCls} text-left flex items-center gap-2 ${canEditCategory ? 'cursor-pointer' : ''}`}
-              >
-                {showCategoryIcons && categoryEntry?.icon && (
-                  <span className="text-base">{categoryEntry.icon}</span>
+            <>
+              <div className="relative">
+                <button
+                  onClick={() => canEditCategory && setShowCategoryPicker(!showCategoryPicker)}
+                  disabled={isReconciled}
+                  className={`${inputCls} text-left flex items-center gap-2 ${canEditCategory ? 'cursor-pointer' : ''}`}
+                >
+                  {showCategoryIcons && categoryEntry?.icon && (
+                    <span className="text-base">{categoryEntry.icon}</span>
+                  )}
+                  <span className={categoryEntry ? '' : 'text-text-tertiary'}>
+                    {categoryEntry?.name ?? 'Uncategorized'}
+                  </span>
+                </button>
+                {showCategoryPicker && (
+                  <CategoryPicker
+                    value={tx.categoryId}
+                    onChange={handleCategoryChange}
+                    groups={groups}
+                    onClose={() => setShowCategoryPicker(false)}
+                  />
                 )}
-                <span className={categoryEntry ? '' : 'text-text-tertiary'}>
-                  {categoryEntry?.name ?? 'Uncategorized'}
-                </span>
-              </button>
-              {showCategoryPicker && (
-                <CategoryPicker
-                  value={tx.categoryId}
-                  onChange={handleCategoryChange}
-                  groups={groups}
-                  onClose={() => setShowCategoryPicker(false)}
-                />
+              </div>
+              {isTransfer && (
+                <p className="text-xs text-text-tertiary mt-1.5">{budgetSideHint(tx.amount > 0)}</p>
               )}
-            </div>
+            </>
           )}
         </div>
 
@@ -331,6 +388,12 @@ export function TransactionDetailPanel({
       </div>
 
       <div className="px-5 py-4 border-t border-border space-y-2">
+        {canLink && (
+          <Button variant="secondary" onClick={() => setShowLink(true)} className="w-full">
+            <Link2 size={14} />
+            Link as transfer
+          </Button>
+        )}
         {!isTransfer && (
           <Button variant="secondary" onClick={startRule} className="w-full">
             <Wand2 size={14} />
@@ -366,6 +429,15 @@ export function TransactionDetailPanel({
           </Button>
         )}
       </div>
+
+      {/* Always mounted: a successful link makes this transaction a transfer, which hides the
+          button that opened it, and the dialog still has to close */}
+      <LinkTransferModal
+        isOpen={showLink}
+        onClose={() => setShowLink(false)}
+        transaction={tx}
+        currency={currency}
+      />
 
       {ruleModal.value && (
         <RuleEditorFlow

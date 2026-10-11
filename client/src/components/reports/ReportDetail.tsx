@@ -820,8 +820,11 @@ function DayTransactions({ day, onClose }: { day: string; onClose: () => void })
     [groups],
   );
   const logos = useMemo(() => new Map(payees.map((p) => [p.id, p.logo])), [payees]);
+  // Like the calendar: transfers count only when they have a category (money in or out of the budget)
   const rows = data.filter(
-    (t) => !t.transferTransactionId && accountsById.get(t.accountId)?.isOffBudget === 0,
+    (t) =>
+      (!t.transferTransactionId || t.categoryId) &&
+      accountsById.get(t.accountId)?.isOffBudget === 0,
   );
   const moneyIn = rows.reduce((s, t) => s + Math.max(t.amount, 0), 0);
   const moneyOut = rows.reduce((s, t) => s - Math.min(t.amount, 0), 0);

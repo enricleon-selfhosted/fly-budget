@@ -1,16 +1,30 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronRight, Check, X } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
-import { useMatchSuggestions, useMatchOccurrence, useDismissMatch } from '../../hooks/useSchedules';
+import {
+  useMatchSuggestions,
+  useMatchOccurrence,
+  useDismissMatch,
+  useSchedules,
+} from '../../hooks/useSchedules';
+import { useAccounts } from '../../hooks/useAccounts';
 import { formatCurrency } from '../../utils/currency';
+import type { MatchSuggestion } from '../../types';
+import { NO_ACCOUNTS, NO_SCHEDULES, accountCurrencyLookup } from './scheduleFormat';
 
 export default function MatchSuggestionsPanel() {
   const { data: suggestions = [] } = useMatchSuggestions();
+  const { data: schedules = NO_SCHEDULES } = useSchedules();
+  const { data: accounts = NO_ACCOUNTS } = useAccounts();
   const matchOcc = useMatchOccurrence();
   const dismissMatch = useDismissMatch();
   const [expanded, setExpanded] = useState(false);
 
   if (suggestions.length === 0) return null;
+
+  // Amounts are shown in the currency of their account (null = the budget's)
+  const currencyOf = accountCurrencyLookup(accounts);
+  const itemAccountId = new Map(schedules.map((s) => [s.id, s.accountId]));
 
   const totalCandidates = suggestions.reduce((s, sg) => s + sg.candidates.length, 0);
 
@@ -32,54 +46,65 @@ export default function MatchSuggestionsPanel() {
 
       {expanded && (
         <div className="bg-surface text-text border-b border-border max-h-80 overflow-y-auto divide-y divide-border-light">
-          {suggestions.map((sg) => (
-            <div key={sg.occurrenceId} className="px-6 py-3">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-sm font-medium text-text">{sg.scheduleName}</span>
-                <span className="text-xs text-text-tertiary">
-                  {format(parseISO(sg.expectedDate), 'MMM d')} · {formatCurrency(sg.expectedAmount)}
-                </span>
-              </div>
+          {suggestions.map((sg) => {
+            const expectedCurrency = currencyOf(itemAccountId.get(sg.scheduleId));
+            return (
+              <div key={sg.occurrenceId} className="px-6 py-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-sm font-medium text-text">{sg.scheduleName}</span>
+                  <span className="text-xs text-text-tertiary">
+                    {format(parseISO(sg.expectedDate), 'MMM d')} ·{' '}
+                    {formatCurrency(sg.expectedAmount, expectedCurrency)}
+                  </span>
+                </div>
 
-              <div className="space-y-1.5 pl-3">
-                {sg.candidates.map((c) => (
-                  <div key={c.transactionId} className="flex items-center gap-3 text-sm">
-                    <div className="flex-1 min-w-0">
-                      <span className="text-text-secondary">{c.payeeName || '—'}</span>
-                      <span className="text-text-tertiary ml-2 text-xs">
-                        {format(parseISO(c.date), 'MMM d')} · {formatCurrency(c.amount)}
-                      </span>
-                      <span className="text-text-tertiary ml-2 text-xs">({c.score}% match)</span>
-                    </div>
-                    <button
-                      onClick={() =>
-                        matchOcc.mutate({
-                          occurrenceId: sg.occurrenceId,
-                          transactionId: c.transactionId,
-                        })
-                      }
-                      className="p-1 rounded text-positive hover:bg-positive-subtle transition-colors"
-                      title="Accept match"
-                    >
-                      <Check size={14} />
-                    </button>
-                    <button
-                      onClick={() =>
-                        dismissMatch.mutate({
-                          occurrenceId: sg.occurrenceId,
-                          transactionId: c.transactionId,
-                        })
-                      }
-                      className="p-1 rounded text-text-tertiary hover:text-negative hover:bg-negative-subtle transition-colors"
-                      title="Dismiss"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                ))}
+                <div className="space-y-1.5 pl-3">
+                  {sg.candidates.map((c) => {
+                    // Each candidate's amount is in its own account's currency
+                    const candidateCurrency = currencyOf(c.accountId);
+                    return (
+                      <div key={c.transactionId} className="flex items-center gap-3 text-sm">
+                        <div className="flex-1 min-w-0">
+                          <span className="text-text-secondary">{c.payeeName || '—'}</span>
+                          <span className="text-text-tertiary ml-2 text-xs">
+                            {format(parseISO(c.date), 'MMM d')} ·{' '}
+                            {formatCurrency(c.amount, candidateCurrency)}
+                          </span>
+                          <span className="text-text-tertiary ml-2 text-xs">
+                            ({c.score}% match)
+                          </span>
+                        </div>
+                        <button
+                          onClick={() =>
+                            matchOcc.mutate({
+                              occurrenceId: sg.occurrenceId,
+                              transactionId: c.transactionId,
+                            })
+                          }
+                          className="p-1 rounded text-positive hover:bg-positive-subtle transition-colors"
+                          title="Accept match"
+                        >
+                          <Check size={14} />
+                        </button>
+                        <button
+                          onClick={() =>
+                            dismissMatch.mutate({
+                              occurrenceId: sg.occurrenceId,
+                              transactionId: c.transactionId,
+                            })
+                          }
+                          className="p-1 rounded text-text-tertiary hover:text-negative hover:bg-negative-subtle transition-colors"
+                          title="Dismiss"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

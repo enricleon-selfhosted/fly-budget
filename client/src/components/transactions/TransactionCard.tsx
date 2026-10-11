@@ -45,8 +45,9 @@ export function TransactionCard({
       <Split size={12} aria-hidden /> Split ({tx.children!.length})
     </span>
   ) : isTransfer ? (
+    // The budget side of money moving in or out of the budget can have a category (D26)
     <span className="inline-flex items-center gap-1">
-      <ArrowLeftRight size={12} aria-hidden /> Transfer
+      <ArrowLeftRight size={12} aria-hidden /> {categoryEntry ? categoryEntry.name : 'Transfer'}
     </span>
   ) : categoryEntry ? (
     <span>

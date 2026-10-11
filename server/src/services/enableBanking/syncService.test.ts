@@ -8,6 +8,7 @@ const counts = fc.record({
   added: fc.nat(1000),
   matched: fc.nat(1000),
   transfers: fc.nat(1000),
+  recurring: fc.nat(1000),
   duplicates: fc.nat(1000),
   otherCurrency: fc.nat(1000),
 });
@@ -23,17 +24,20 @@ describe('sync results', () => {
           added: 0,
           matched: 0,
           transfers: 0,
+          recurring: 0,
           status: 'good',
           errors: [],
         });
         const total = imports.reduce(addCounts, empty);
-        const sum = (k: 'added' | 'matched' | 'transfers') => imports.reduce((n, i) => n + i[k], 0);
+        const sum = (k: 'added' | 'matched' | 'transfers' | 'recurring') =>
+          imports.reduce((n, i) => n + i[k], 0);
         // Only the counts a sync reports: nothing else from the import reaches the response
         expect(total).toEqual({
           ...empty,
           added: sum('added'),
           matched: sum('matched'),
           transfers: sum('transfers'),
+          recurring: sum('recurring'),
         });
       }),
     );

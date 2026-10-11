@@ -13,7 +13,7 @@ import { enableBankingStore } from './store.js';
 // the bank-sync core, record the bank's balance (decisions D7–D10). The rules are in rules.ts.
 
 /** The import counts a sync reports, summed over the connection's accounts */
-const COUNTS = ['added', 'matched', 'transfers'] as const;
+const COUNTS = ['added', 'matched', 'transfers', 'recurring'] as const;
 type ImportCounts = Pick<ImportResult, (typeof COUNTS)[number]>;
 
 export type SyncResult = ImportCounts & {
@@ -90,8 +90,15 @@ async function runSync(
   enableBankingStore.setStatus(connectionId, 'syncing', { lastAttemptAt: startedIso });
   const today = localDay(startedAt);
   const ownAccountsByIbanHash = enableBankingStore.ownAccountsByIbanHash();
+  const bankAccounts = enableBankingStore.listAccounts(connectionId);
+  // The connection's imported accounts and their currencies: exchanges happen within a bank
+  const exchangePartners = new Map(
+    bankAccounts
+      .filter((b) => b.accountId && b.isEnabled && b.inConsent && b.currency)
+      .map((b) => [b.accountId!, b.currency!]),
+  );
 
-  for (const bank of enableBankingStore.listAccounts(connectionId)) {
+  for (const bank of bankAccounts) {
     if (!bank.accountId || !bank.isEnabled || !bank.inConsent || !bank.currency) continue;
     const local = openAccount(bank.accountId);
     if (!local) continue;
@@ -112,7 +119,7 @@ async function runSync(
           currency: bank.currency,
         },
         remote,
-        { ownAccountsByIbanHash },
+        { ownAccountsByIbanHash, exchangePartners },
       );
       result = addCounts(result, imported);
       // The next sync of this account reads from a little before now
