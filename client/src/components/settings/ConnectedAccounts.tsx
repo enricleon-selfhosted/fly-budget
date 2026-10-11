@@ -46,7 +46,7 @@ function ConnectedAccountsSettings() {
   const { data: ebConnections = NO_ENABLE_BANKING } = useEnableBankingConnections();
   const syncAll = useSyncAll();
   const syncAllSf = useSyncAllSimplefin();
-  // ?provider=enablebanking (the Welcome page's option) opens that tab, until the user picks another
+  // ?provider=enablebanking (a link straight to Enable Banking) opens that tab, until the user picks another
   const [searchParams] = useSearchParams();
   const [chosenProvider, setChosenProvider] = useState<Provider | null>(null);
   const provider: Provider =

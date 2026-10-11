@@ -11,7 +11,8 @@ import { AccountIcon } from './AccountIcon';
 import { AccountTypeSelect } from './AccountTypeSelect';
 import { fileToSquareDataUrl } from '../../utils/imageResize';
 import { usePreferencesStore } from '../../store/preferencesStore';
-import { otherCurrencyCodes, useBudgetCurrency } from '../../utils/budgetCurrency';
+import { otherCurrencyCodes } from '../../utils/budgetCurrency';
+import { useBudgetCurrency } from '../../hooks/useBudgetCurrency';
 import { ForeignBudgetHint } from './ForeignBudgetHint';
 
 interface Props {

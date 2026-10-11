@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, Loader2, RefreshCw, Unlink } from 'lucide-react';
-import { format, formatDistanceToNow, isValid } from 'date-fns';
+import { formatDistanceToNow } from 'date-fns';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { ConfirmModal } from '../ui/ConfirmModal';
@@ -14,7 +14,7 @@ import {
   useDisconnectEnableBanking,
   useSyncEnableBankingConnection,
 } from '../../hooks/useEnableBanking';
-import { useBudgetCurrency } from '../../utils/budgetCurrency';
+import { useBudgetCurrency } from '../../hooks/useBudgetCurrency';
 import { formatCurrency } from '../../utils/currency';
 import type {
   EnableBankingAccount,
@@ -22,25 +22,13 @@ import type {
   EnableBankingMappingResult,
   EnableBankingSyncStatus,
 } from '../../types';
-import {
-  RENEW_WARNING_DAYS,
-  accessLeft,
-  bankCurrency,
-  countryName,
-  describeSync,
-  plural,
-} from './model';
+import { accessStatus, bankCurrency, countryName, describeSync, plural } from './model';
 
 const STATUS_LABEL: Record<EnableBankingSyncStatus, { label: string; dot: string }> = {
   good: { label: 'Synced', dot: 'bg-positive' },
   syncing: { label: 'Syncing...', dot: '' },
   error: { label: 'Error', dot: 'bg-negative' },
   reauth_required: { label: 'Renewal needed', dot: 'bg-caution' },
-};
-
-const formatDate = (iso: string) => {
-  const date = new Date(iso);
-  return isValid(date) ? format(date, 'MMM d, yyyy') : '';
 };
 
 interface Props {
@@ -59,10 +47,7 @@ export function EnableBankingConnectionCard({ connection }: Props) {
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [mapped, setMapped] = useState<EnableBankingMappingResult | null>(null);
 
-  const access = accessLeft(connection.validUntil, new Date());
-  const expired = access?.expired === true;
-  const expiresSoon = access !== null && !expired && access.days < RENEW_WARNING_DAYS;
-  const renewNeeded = connection.syncStatus === 'reauth_required' || expired || expiresSoon;
+  const { renewNeeded, text: accessText } = accessStatus(connection, new Date());
   const isSyncing = sync.isPending || connection.syncStatus === 'syncing';
   const initial = connection.aspspName.charAt(0).toUpperCase();
   const status =
@@ -73,15 +58,6 @@ export function EnableBankingConnectionCard({ connection }: Props) {
   const syncedText = connection.lastSyncedAt
     ? `Last synced ${formatDistanceToNow(new Date(connection.lastSyncedAt), { addSuffix: true })}`
     : 'Not synced yet';
-
-  let accessText: string | null = null;
-  if (access) {
-    const until = formatDate(connection.validUntil);
-    if (expired) accessText = `Access ended ${until}`;
-    else if (expiresSoon) {
-      accessText = `Access until ${until} (${access.days >= 1 ? `${plural(access.days, 'day')} left` : 'ends today'})`;
-    } else accessText = `Access until ${until}`;
-  }
 
   const nameOf = (accountId: string) =>
     connection.accounts.find((a) => a.id === accountId)?.name ?? 'Account';

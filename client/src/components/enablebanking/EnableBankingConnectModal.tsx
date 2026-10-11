@@ -19,7 +19,16 @@ import {
 import { useEnableBankingConsent } from '../../hooks/useEnableBankingConsent';
 import { SavingPausedHint } from '../connection/SavingPausedHint';
 import { EnableBankingAccountMapping } from './EnableBankingAccountMapping';
-import { EEA_COUNTRIES, defaultCountry, describeSync, plural, psuOptions } from './model';
+import {
+  EEA_COUNTRIES,
+  accountsToMapAfterConsent,
+  defaultCountry,
+  describeSync,
+  plural,
+  psuOptions,
+  stepAfterConsent,
+  stepAfterMapping,
+} from './model';
 import { choiceClass, fieldClass, labelClass } from './styles';
 import type { StartConsentInput } from '../../api/enableBanking';
 import type {
@@ -86,13 +95,18 @@ function ConnectDialog({ open, onClose, renewConnection }: Props) {
   const bankInput: StartConsentInput | null = selected
     ? { aspspName: selected.name, country, psuType: psu }
     : null;
-  const renewInput: StartConsentInput | null = renewConnection
-    ? {
-        aspspName: renewConnection.aspspName,
-        country: renewConnection.aspspCountry,
-        connectionId: renewConnection.id,
-      }
-    : null;
+  // The same request each time this connection is renewed (on opening, and from Try again)
+  const renewInput = useMemo<StartConsentInput | null>(
+    () =>
+      renewConnection
+        ? {
+            aspspName: renewConnection.aspspName,
+            country: renewConnection.aspspCountry,
+            connectionId: renewConnection.id,
+          }
+        : null,
+    [renewConnection],
+  );
   const consentInput = renewing ? renewInput : bankInput;
 
   const consent = useEnableBankingConsent(handleConsented);
@@ -119,25 +133,18 @@ function ConnectDialog({ open, onClose, renewConnection }: Props) {
       renewStarted.current = false;
       return;
     }
-    if (!renewConnection || renewStarted.current) return;
+    if (!renewInput || renewStarted.current) return;
     renewStarted.current = true;
-    void start({
-      aspspName: renewConnection.aspspName,
-      country: renewConnection.aspspCountry,
-      connectionId: renewConnection.id,
-    });
-  }, [open, renewConnection, start]);
+    void start(renewInput);
+  }, [open, renewInput, start]);
 
   function handleConsented(result: EnableBankingConsentResult) {
     setConnectionId(result.connectionId);
-    // Renewing: only the accounts the bank added since. The others are already imported or ignored.
-    const fresh = renewing
-      ? result.accounts.filter((a) => a.accountId === null && a.isEnabled)
-      : result.accounts;
-    setAccountsToMap(fresh);
-    if (fresh.length > 0) setStep('accounts');
-    else if (renewing) void runSync(result.connectionId);
-    else setStep('done');
+    const toMap = accountsToMapAfterConsent(result.accounts, renewing);
+    setAccountsToMap(toMap);
+    const next = stepAfterConsent(toMap.length, renewing);
+    if (next === 'sync') void runSync(result.connectionId);
+    else setStep(next);
   }
 
   async function runSync(id: string) {
@@ -152,8 +159,7 @@ function ConnectDialog({ open, onClose, renewConnection }: Props) {
 
   function handleMapped(result: EnableBankingMappingResult) {
     setMapping(result);
-    const imported = result.created + result.linked;
-    if (imported === 0 && !renewing) setStep('done');
+    if (stepAfterMapping(result, renewing) === 'done') setStep('done');
     else if (connectionId) void runSync(connectionId);
   }
 

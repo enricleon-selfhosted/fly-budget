@@ -1,6 +1,7 @@
 // Values in the budget's currency for transactions in accounts in another currency (docs/multi-currency).
 // Pure: the screens use these. The server converts the same way (services/balances.ts `budgetValue`).
 import type { FxSource, Transaction } from '../types';
+import { rateText } from './currencyRates';
 
 type ValueFields = Pick<Transaction, 'amount' | 'budgetAmount'>;
 
@@ -28,15 +29,17 @@ export function budgetTotal(txs: readonly ValueFields[]): { total: number; waiti
   return { total, waiting };
 }
 
-const rateFormat = new Intl.NumberFormat('en-US', {
-  minimumFractionDigits: 4,
-  maximumFractionDigits: 4,
-});
-
-/** "1 GBP = 1.1700 EUR": one unit of the account's currency in the budget's. Null without a rate. */
-export function rateText(rate: number | null | undefined, from: string, to: string): string | null {
-  if (rate === null || rate === undefined || !Number.isFinite(rate) || rate <= 0) return null;
-  return `1 ${from} = ${rateFormat.format(rate)} ${to}`;
+/**
+ * Whether a transaction's value in the budget's currency can be typed in: not when it's
+ * reconciled, a split part (it follows its whole transaction's rate) or one side of an exchange
+ * (the value is what arrived on the other side). The server checks the same
+ * (budgetAmountProblem in server/src/services/fx/conversion.ts, through fxService's
+ * setBudgetAmount); this only decides whether the field is offered.
+ */
+export function budgetValueEditable(
+  tx: Pick<Transaction, 'reconciled' | 'parentTransactionId' | 'fxSource'>,
+): boolean {
+  return tx.reconciled !== 1 && !tx.parentTransactionId && tx.fxSource !== 'exchange';
 }
 
 const SOURCE_LABELS: Record<FxSource, string> = {
@@ -50,13 +53,16 @@ export function fxSourceLabel(source: FxSource | null | undefined): string {
   return source ? SOURCE_LABELS[source] : 'No exchange rate yet';
 }
 
-/** "At the day's rate · 1 GBP = 1.1700 EUR": the source, then the rate it was converted at */
+/**
+ * "At the day's rate · 1 GBP = 1.1700 EUR": the source, then the rate it was converted at (one
+ * unit of the account's currency `from` in the budget's `to`), left out while there is none
+ */
 export function fxNote(
   source: FxSource | null | undefined,
   rate: number | null | undefined,
   from: string,
   to: string,
 ): string {
-  const ratePart = rateText(rate, from, to);
-  return ratePart ? `${fxSourceLabel(source)} · ${ratePart}` : fxSourceLabel(source);
+  const usable = rate !== null && rate !== undefined && Number.isFinite(rate) && rate > 0;
+  return usable ? `${fxSourceLabel(source)} · ${rateText(from, to, rate)}` : fxSourceLabel(source);
 }

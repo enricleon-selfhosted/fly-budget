@@ -1,15 +1,9 @@
 import { Link } from 'react-router-dom';
 import { useCurrencies } from '../../hooks/useCurrencies';
 import { ExternalLink } from '../ui/ExternalLink';
-import { useBudgetCurrency } from '../../utils/budgetCurrency';
+import { useBudgetCurrency } from '../../hooks/useBudgetCurrency';
+import { unsupportedCurrencies } from '../../utils/currencyRates';
 import { docsUrl } from '../../utils/project';
-
-/** The codes the ECB doesn't publish, from `ratesError` ("unsupported:ARS,KES") */
-function unsupportedCodes(ratesError: string | null | undefined): string[] {
-  const prefix = 'unsupported:';
-  if (!ratesError?.startsWith(prefix)) return [];
-  return ratesError.slice(prefix.length).split(',');
-}
 
 interface Props {
   /** The account's currency (not the budget's) */
@@ -46,7 +40,7 @@ export function ForeignBudgetHint({ currency, offBudget }: Props) {
   const noRateSource =
     data !== undefined &&
     !entry?.latest &&
-    (!data.downloadRates || unsupportedCodes(data.ratesError).includes(currency));
+    (!data.downloadRates || unsupportedCurrencies(data.ratesError).includes(currency));
 
   return (
     <span className="block text-xs text-text-tertiary">

@@ -7,13 +7,44 @@ import type { ExchangeRate } from '../types';
 /** The largest rate the server accepts */
 export const MAX_RATE = 1e9;
 
-const rateNumber = new Intl.NumberFormat('en-US', { maximumSignificantDigits: 6 });
 const countNumber = new Intl.NumberFormat('en-US');
 const listWords = new Intl.ListFormat('en', { style: 'long', type: 'conjunction' });
 
-/** "1 GBP = 1.1798 EUR": one `base` is `rate` `quote` (the budget's currency) */
+const RATE_MIN_DECIMALS = 4;
+const RATE_SIGNIFICANT_DIGITS = 6;
+// Intl takes at most 20 fraction digits everywhere; no currency's rate is that small
+const RATE_MAX_DECIMALS = 20;
+const rateFormats = new Map<number, Intl.NumberFormat>();
+const tinyRate = new Intl.NumberFormat('en-US', {
+  maximumSignificantDigits: RATE_SIGNIFICANT_DIGITS,
+});
+
+/**
+ * A rate with at least four decimals and at least six significant digits: 1.1000, 1.17981,
+ * 0.00612345 and 0.000058, so a small rate never reads as 0.0000.
+ */
+function rateNumber(rate: number): string {
+  const wholeDigits = rate > 0 ? Math.floor(Math.log10(rate)) + 1 : 1;
+  const decimals = Math.max(RATE_MIN_DECIMALS, RATE_SIGNIFICANT_DIGITS - wholeDigits);
+  if (decimals > RATE_MAX_DECIMALS) return tinyRate.format(rate);
+  let format = rateFormats.get(decimals);
+  if (!format) {
+    format = new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: RATE_MIN_DECIMALS,
+      maximumFractionDigits: decimals,
+    });
+    rateFormats.set(decimals, format);
+  }
+  return format.format(rate);
+}
+
+/**
+ * "1 GBP = 1.1798 EUR": one `base` is `rate` `quote`. The one way a rate is written, in
+ * Settings, next to a converted transaction (the budget's currency is `quote`) and under an
+ * exchange (the received currency is `quote`).
+ */
 export function rateText(base: string, quote: string, rate: number): string {
-  return `1 ${base} = ${rateNumber.format(rate)} ${quote}`;
+  return `1 ${base} = ${rateNumber(rate)} ${quote}`;
 }
 
 /** "Oct 9, 2026", or the text itself when it isn't a day */

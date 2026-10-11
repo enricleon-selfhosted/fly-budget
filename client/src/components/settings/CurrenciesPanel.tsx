@@ -11,7 +11,7 @@ import {
   useUpdateCurrencySettings,
 } from '../../hooks/useCurrencies';
 import { IS_DEMO } from '../../demo/isDemo';
-import { useBudgetCurrency } from '../../utils/budgetCurrency';
+import { useBudgetCurrency } from '../../hooks/useBudgetCurrency';
 import {
   accountCountText,
   checkRateEntry,

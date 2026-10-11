@@ -7,8 +7,16 @@ import { CategorySelect } from './CategorySelect';
 import type { Account, CategoryGroup, Payee, Transaction } from '../../types';
 import type { CreateTransactionData, SplitItem } from '../../api/transactions';
 import { parseCents, centsToInput, formatCurrency } from '../../utils/currency';
-import { accountCurrency, useBudgetCurrency } from '../../utils/budgetCurrency';
+import { accountCurrency } from '../../utils/budgetCurrency';
+import { useBudgetCurrency } from '../../hooks/useBudgetCurrency';
 import { isExchange } from '../../utils/transfers';
+
+/** What the form saves */
+export interface TransactionFormValues {
+  data: CreateTransactionData;
+  /** A transfer across currencies: what the other account received or sent, in its currency (D25) */
+  otherAmount?: number;
+}
 
 interface Props {
   initial?: Transaction;
@@ -16,8 +24,7 @@ interface Props {
   groups: CategoryGroup[];
   payees: Payee[];
   accounts?: Account[];
-  /** `toAmount`: for a transfer across currencies, the other account's amount (D25) */
-  onSave: (data: CreateTransactionData, toAmount?: number) => void;
+  onSave: (values: TransactionFormValues) => void;
   onCancel: () => void;
   onDelete?: () => void;
   /** `row`: inline in the register (desktop). `sheet`: one column in a phone sheet. */
@@ -99,20 +106,22 @@ export function TransactionFormRow({
       if (splitItems.length < 2) return;
 
       onSave({
-        accountId,
-        date,
-        payeeId: payee.id,
-        payeeName: payee.name || null,
-        categoryId: null,
-        notes: notes || null,
-        amount,
-        splits: splitItems,
+        data: {
+          accountId,
+          date,
+          payeeId: payee.id,
+          payeeName: payee.name || null,
+          categoryId: null,
+          notes: notes || null,
+          amount,
+          splits: splitItems,
+        },
       });
       return;
     }
 
-    onSave(
-      {
+    onSave({
+      data: {
         accountId,
         date,
         payeeId: payee.id,
@@ -121,8 +130,8 @@ export function TransactionFormRow({
         notes: notes || null,
         amount,
       },
-      exchange ? receivedCents : undefined,
-    );
+      otherAmount: exchange ? receivedCents : undefined,
+    });
   }
 
   function updateSplit(idx: number, field: keyof SplitRow, value: string | null) {

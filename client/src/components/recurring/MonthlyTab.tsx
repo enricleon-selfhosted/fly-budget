@@ -19,7 +19,7 @@ import {
 } from '../../hooks/useSchedules';
 import { useAccounts } from '../../hooks/useAccounts';
 import { formatCurrency } from '../../utils/currency';
-import { useBudgetCurrency } from '../../utils/budgetCurrency';
+import { useBudgetCurrency } from '../../hooks/useBudgetCurrency';
 import { Button } from '../ui/Button';
 import { EmptyState } from '../ui/EmptyState';
 import { docsUrl } from '../../utils/project';

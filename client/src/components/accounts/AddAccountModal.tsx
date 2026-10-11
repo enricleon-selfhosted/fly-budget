@@ -5,8 +5,9 @@ import { SavingPausedHint } from '../connection/SavingPausedHint';
 import { CurrencyInput } from '../ui/CurrencyInput';
 import { useCreateAccount } from '../../hooks/useAccounts';
 import type { AccountType } from '../../types';
-import { accountTypeInfo } from '../../utils/accountTypes';
-import { otherCurrencyCodes, useBudgetCurrency } from '../../utils/budgetCurrency';
+import { accountTypeInfo, startsOffBudget } from '../../utils/accountTypes';
+import { otherCurrencyCodes } from '../../utils/budgetCurrency';
+import { useBudgetCurrency } from '../../hooks/useBudgetCurrency';
 import { AccountTypeSelect } from './AccountTypeSelect';
 import { ForeignBudgetHint } from './ForeignBudgetHint';
 
@@ -39,13 +40,13 @@ export function AddAccountModal({ isOpen, onClose }: Props) {
 
   function handleTypeChange(next: AccountType) {
     setType(next);
-    setIsOffBudget(foreign || !accountTypeInfo(next).onBudget);
+    setIsOffBudget(startsOffBudget(next, foreign));
   }
 
   function handleCurrencyChange(next: string | null) {
     setCurrency(next);
     // A new account in another currency starts off budget (M1), but can be ticked back on
-    if (next !== null) setIsOffBudget(true);
+    if (next !== null) setIsOffBudget(startsOffBudget(type, true));
   }
 
   async function handleSubmit(e: React.FormEvent) {

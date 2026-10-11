@@ -8,7 +8,8 @@ import {
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { useModalValue } from '../ui/Modal';
 import { IS_DEMO } from '../../demo/isDemo';
-import { CURRENCY_CODES, useBudgetCurrency } from '../../utils/budgetCurrency';
+import { CURRENCY_CODES } from '../../utils/budgetCurrency';
+import { useBudgetCurrency } from '../../hooks/useBudgetCurrency';
 import { budgetCurrencyChangeText } from '../../utils/currencyRates';
 import { useCanSave } from '../../hooks/useConnection';
 import { useCurrencies, useUpdateCurrencySettings } from '../../hooks/useCurrencies';

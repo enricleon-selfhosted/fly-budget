@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
-import { budgetTotal, fxNote, fxSourceLabel, rateText, valueInBudget } from './fxDisplay';
+import { rateText } from './currencyRates';
+import {
+  budgetTotal,
+  budgetValueEditable,
+  fxNote,
+  fxSourceLabel,
+  valueInBudget,
+} from './fxDisplay';
 
 const arbCents = fc.integer({ min: -1_000_000_000, max: 1_000_000_000 });
 const arbSource = fc.constantFrom('manual' as const, 'exchange' as const, 'rate' as const);
@@ -92,40 +99,6 @@ describe('budgetTotal (property-based)', () => {
   });
 });
 
-describe('rateText (property-based)', () => {
-  it('has no text without a usable rate', () => {
-    expect(rateText(null, 'GBP', 'EUR')).toBeNull();
-    expect(rateText(undefined, 'GBP', 'EUR')).toBeNull();
-    expect(rateText(0, 'GBP', 'EUR')).toBeNull();
-    expect(rateText(Number.NaN, 'GBP', 'EUR')).toBeNull();
-    expect(rateText(Number.POSITIVE_INFINITY, 'GBP', 'EUR')).toBeNull();
-    fc.assert(
-      fc.property(fc.double({ min: -1000, max: 0, noNaN: true }), (rate) => {
-        expect(rateText(rate, 'GBP', 'EUR')).toBeNull();
-      }),
-    );
-  });
-
-  it('reads "1 FROM = rate TO" with four decimals, rounded from the rate', () => {
-    fc.assert(
-      fc.property(
-        fc.double({ min: 0.0001, max: 1000, noNaN: true, noDefaultInfinity: true }),
-        arbCode,
-        arbCode,
-        (rate, from, to) => {
-          const text = rateText(rate, from, to)!;
-          const match = /^1 ([A-Z]{3}) = ([\d,]+\.\d{4}) ([A-Z]{3})$/.exec(text);
-          expect(match).not.toBeNull();
-          expect(match![1]).toBe(from);
-          expect(match![3]).toBe(to);
-          const shown = Number(match![2].replace(/,/g, ''));
-          expect(Math.abs(shown - rate)).toBeLessThanOrEqual(0.00005 + 1e-9);
-        },
-      ),
-    );
-  });
-});
-
 describe('fxSourceLabel and fxNote (property-based)', () => {
   it('gives each source its own label, and a clear one for no rate', () => {
     const labels = [
@@ -157,7 +130,76 @@ describe('fxSourceLabel and fxNote (property-based)', () => {
     );
   });
 
+  it('leaves the rate out when there is no usable one', () => {
+    fc.assert(
+      fc.property(
+        fc.option(arbSource, { nil: null }),
+        fc.constantFrom(
+          null,
+          undefined,
+          0,
+          -1.5,
+          Number.NaN,
+          Number.POSITIVE_INFINITY,
+          Number.NEGATIVE_INFINITY,
+        ),
+        (source, rate) => {
+          expect(fxNote(source, rate, 'GBP', 'EUR')).toBe(fxSourceLabel(source));
+        },
+      ),
+    );
+  });
+
+  it('writes the rate the way every other screen does (rateText)', () => {
+    fc.assert(
+      fc.property(
+        arbSource,
+        fc.double({ min: 1e-12, max: 1e9, noNaN: true, noDefaultInfinity: true }),
+        arbCode,
+        arbCode,
+        (source, rate, from, to) => {
+          expect(fxNote(source, rate, from, to)).toBe(
+            `${fxSourceLabel(source)} · ${rateText(from, to, rate)}`,
+          );
+        },
+      ),
+    );
+  });
+
   it('spells out the rate with the same "·" separator the detail panel uses', () => {
     expect(fxNote('rate', 1.17, 'GBP', 'EUR')).toBe("At the day's rate · 1 GBP = 1.1700 EUR");
+  });
+
+  it('shows a small rate instead of rounding it away', () => {
+    expect(fxNote('rate', 0.000058, 'IDR', 'EUR')).toBe("At the day's rate · 1 IDR = 0.000058 EUR");
+  });
+});
+
+describe('budgetValueEditable (property-based)', () => {
+  const arbTx = fc.record({
+    reconciled: fc.constantFrom(0, 1),
+    parentTransactionId: fc.option(fc.constant('parent-1'), { nil: null }),
+    fxSource: fc.option(arbSource, { nil: null }),
+  });
+
+  it('can be typed in unless reconciled, a split part or one side of an exchange', () => {
+    fc.assert(
+      fc.property(arbTx, (tx) => {
+        expect(budgetValueEditable(tx)).toBe(
+          tx.reconciled === 0 && tx.parentTransactionId === null && tx.fxSource !== 'exchange',
+        );
+      }),
+    );
+  });
+
+  it("a value typed in before, or at the day's rate, can be changed", () => {
+    for (const fxSource of ['manual', 'rate', null] as const) {
+      expect(budgetValueEditable({ reconciled: 0, parentTransactionId: null, fxSource })).toBe(
+        true,
+      );
+    }
+    expect(
+      budgetValueEditable({ reconciled: 0, parentTransactionId: null, fxSource: 'exchange' }),
+    ).toBe(false);
   });
 });

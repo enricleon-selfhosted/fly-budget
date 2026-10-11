@@ -22,11 +22,13 @@ import { useUpdatePayee } from '../../hooks/usePayees';
 import { usePreferencesStore } from '../../store/preferencesStore';
 import { AccountIcon } from '../accounts/AccountIcon';
 import { formatCurrency } from '../../utils/currency';
-import { accountCurrency, useBudgetCurrency } from '../../utils/budgetCurrency';
-import { fxNote } from '../../utils/fxDisplay';
+import { accountCurrency } from '../../utils/budgetCurrency';
+import { useBudgetCurrency } from '../../hooks/useBudgetCurrency';
+import { budgetValueEditable, fxNote } from '../../utils/fxDisplay';
 import {
   budgetSideHint,
   budgetSideTakesCategory,
+  canLinkAsTransfer,
   exchangeLabel,
   isExchange,
 } from '../../utils/transfers';
@@ -130,12 +132,7 @@ export function TransactionDetailPanel({
     budgetSideTakesCategory(thisAccount, otherAccount);
   const canEditCategory = !isReconciled && !isSplitParent && (!isTransfer || budgetSide);
   // Plain transactions can be paired with the matching one in another account
-  const canLink =
-    !isTransfer &&
-    !isReconciled &&
-    tx.isParent !== 1 &&
-    !tx.parentTransactionId &&
-    !tx.isAdjustment;
+  const canLink = canLinkAsTransfer(tx);
 
   // Across currencies a transfer shows both sides; the side money left comes first (D25)
   let exchangeText: string | null = null;
@@ -160,7 +157,7 @@ export function TransactionDetailPanel({
   // In an account in another currency: its value in the budget's currency (docs/multi-currency).
   // Split parts follow their whole transaction, and an exchange's value is what arrived elsewhere.
   const accountCode = currency ?? budgetCode;
-  const valueLocked = isReconciled || !!tx.parentTransactionId || tx.fxSource === 'exchange';
+  const valueLocked = !budgetValueEditable(tx);
   const valueEditable = !valueLocked && canSave;
 
   /** Typed in as a positive amount: it takes the direction of the transaction */

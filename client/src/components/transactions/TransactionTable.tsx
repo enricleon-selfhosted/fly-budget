@@ -7,7 +7,7 @@ import { useCategories } from '../../hooks/useCategories';
 import { usePayees } from '../../hooks/usePayees';
 import { useAccounts } from '../../hooks/useAccounts';
 import { TransactionFilters, DEFAULT_FILTERS, filtersToParams } from './TransactionFilters';
-import { TransactionFormRow } from './TransactionFormRow';
+import { TransactionFormRow, type TransactionFormValues } from './TransactionFormRow';
 import { TransactionRow } from './TransactionRow';
 import { TransactionCard } from './TransactionCard';
 import { WaitingTransactions } from './WaitingTransactions';
@@ -22,9 +22,9 @@ import { docsUrl } from '../../utils/project';
 import { useAddTransaction } from '../../hooks/useOffline';
 import { formatCurrency } from '../../utils/currency';
 import { budgetTotal } from '../../utils/fxDisplay';
+import { transferRequest, type TransferAccount } from '../../utils/transfers';
 import type { FilterState } from './TransactionFilters';
 import type { CategoryGroup, Transaction } from '../../types';
-import type { CreateTransactionData } from '../../api/transactions';
 
 /**
  * A day's absolute total. One account's rows share its currency, so they add up as they are.
@@ -198,29 +198,27 @@ export function TransactionTable({
     return result;
   }, [transactions, accountId]);
 
-  // `toAmount`: the other account's amount when the transfer crosses currencies (D25)
-  function handleCreate(data: CreateTransactionData, toAmount?: number) {
+  /** An account as the transfer rules see it (one not loaded yet: the budget's currency, on budget) */
+  function transferAccount(id: string): TransferAccount {
+    return accounts.find((a) => a.id === id) ?? { currency: null, isOffBudget: 0 };
+  }
+
+  // `otherAmount`: the other account's amount when the transfer crosses currencies (D25)
+  function handleCreate({ data, otherAmount }: TransactionFormValues) {
     if (data.categoryId?.startsWith('transfer:') && accountId) {
       const otherId = data.categoryId.slice('transfer:'.length);
-      const sent = Math.abs(data.amount);
-      // The server takes `amount` on the sending side and `toAmount` on the receiving side.
-      // An outflow leaves this account; an inflow comes from the other account into this one.
-      const sides =
-        data.amount > 0
-          ? {
-              fromAccountId: otherId,
-              toAccountId: accountId,
-              amount: toAmount ?? sent,
-              toAmount: toAmount === undefined ? undefined : sent,
-            }
-          : { fromAccountId: accountId, toAccountId: otherId, amount: sent, toAmount };
-      newTx.add(
+      const request = transferRequest(
         {
-          kind: 'transfer',
-          data: { ...sides, date: data.date, notes: data.notes },
+          accountId,
+          otherAccountId: otherId,
+          signedAmount: data.amount,
+          otherAmount,
+          date: data.date,
+          notes: data.notes,
         },
-        () => setShowAdd(false),
+        { self: transferAccount(accountId), other: transferAccount(otherId) },
       );
+      newTx.add({ kind: 'transfer', data: request }, () => setShowAdd(false));
       return;
     }
     newTx.add({ kind: 'transaction', data }, () => setShowAdd(false));

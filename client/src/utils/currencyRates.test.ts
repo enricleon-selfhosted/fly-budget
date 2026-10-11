@@ -55,6 +55,31 @@ describe('rate text (property-based)', () => {
     );
   });
 
+  it('always shows at least four decimals for any real rate', () => {
+    fc.assert(
+      fc.property(
+        fc.double({ min: 1e-15, max: MAX_RATE, noNaN: true, noDefaultInfinity: true }),
+        (rate) => {
+          const number = rateText('GBP', 'EUR', rate).split(' ')[3];
+          expect(number).toMatch(/^[\d,]+\.\d{4,}$/);
+        },
+      ),
+    );
+  });
+
+  it('writes rates near 1 with four decimals, and small ones with six significant digits', () => {
+    expect(rateText('EUR', 'USD', 1.1)).toBe('1 EUR = 1.1000 USD');
+    expect(rateText('GBP', 'EUR', 1.1798)).toBe('1 GBP = 1.1798 EUR');
+    expect(rateText('GBP', 'EUR', 1.17981234)).toBe('1 GBP = 1.17981 EUR');
+    expect(rateText('JPY', 'EUR', 0.00612345)).toBe('1 JPY = 0.00612345 EUR');
+    expect(rateText('EUR', 'JPY', 162.35)).toBe('1 EUR = 162.3500 JPY');
+  });
+
+  it('never rounds a small rate away (about 0.000058 for IDR to EUR)', () => {
+    expect(rateText('IDR', 'EUR', 0.000058)).toBe('1 IDR = 0.000058 EUR');
+    expect(rateText('IDR', 'EUR', 0.0000581234567)).toBe('1 IDR = 0.0000581235 EUR');
+  });
+
   it('shows the latest rate with its day, or "No rate yet"', () => {
     expect(latestRateText('GBP', 'EUR', null)).toBe('No rate yet');
     fc.assert(

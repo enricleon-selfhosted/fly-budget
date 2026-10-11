@@ -6,8 +6,14 @@ import { Button } from '../ui/Button';
 import { SavedOnDeviceHint } from '../connection/SavingPausedHint';
 import { CurrencyInput } from '../ui/CurrencyInput';
 import { formatCurrency } from '../../utils/currency';
-import { accountCurrency, useBudgetCurrency } from '../../utils/budgetCurrency';
-import { budgetSideHint, crossesBudgetBoundary, isExchange } from '../../utils/transfers';
+import { accountCurrency } from '../../utils/budgetCurrency';
+import { useBudgetCurrency } from '../../hooks/useBudgetCurrency';
+import {
+  budgetSideHint,
+  crossesBudgetBoundary,
+  isExchange,
+  transferRequest,
+} from '../../utils/transfers';
 import { useAccounts } from '../../hooks/useAccounts';
 import { useAddTransaction } from '../../hooks/useOffline';
 import { MerchantSelect } from './MerchantSelect';
@@ -114,27 +120,21 @@ export function AddTransactionModal({ isOpen, onClose }: Props) {
   function handleSubmit() {
     if (!isValid) return;
     if (transferToId) {
-      // The transfer's `amount` is the sending side's and `toAmount` the receiving side's (D25).
-      // The typed amount is the selected account's; the other side's is `received`.
-      const sides = !exchange
-        ? { amount }
-        : debit
-          ? { amount, toAmount: received }
-          : { amount: received, toAmount: amount };
-      newTx.add(
+      if (!selectedAccount || !transferAccount) return;
+      // The typed amount is the selected account's; an exchange's other side is `received`
+      const data = transferRequest(
         {
-          kind: 'transfer',
-          data: {
-            fromAccountId: debit ? accountId : transferToId,
-            toAccountId: debit ? transferToId : accountId,
-            date,
-            ...sides,
-            categoryId: boundary ? budgetCategoryId : null,
-            notes: notes || null,
-          },
+          accountId,
+          otherAccountId: transferToId,
+          signedAmount: debit ? -amount : amount,
+          otherAmount: received,
+          categoryId: budgetCategoryId,
+          date,
+          notes: notes || null,
         },
-        onClose,
+        { self: selectedAccount, other: transferAccount },
       );
+      newTx.add({ kind: 'transfer', data }, onClose);
       return;
     }
     const finalAmount = type === 'debit' ? -amount : amount;

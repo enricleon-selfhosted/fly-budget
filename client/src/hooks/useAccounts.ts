@@ -2,25 +2,14 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as accountsApi from '../api/accounts';
 import { useUndoStore } from '../store/undoStore';
 import type { Account } from '../types';
-
-// Changing an account's currency or budget status changes what its transactions are worth in the
-// budget (docs/multi-currency M5, M8), so every figure built from them is refreshed
-const BUDGET_FIGURES = [
-  'transactions',
-  'budget',
-  'budget-summary',
-  'reports',
-  'category-history',
-  'dashboards',
-  'currencies',
-];
-
-function refreshBudgetFigures(qc: ReturnType<typeof useQueryClient>) {
-  for (const key of BUDGET_FIGURES) qc.invalidateQueries({ queryKey: [key] });
-}
+import { refreshBudgetFigures } from './budgetFigures';
 
 type AccountUpdate = Parameters<typeof accountsApi.updateAccount>[1];
 
+/**
+ * Changing an account's currency or budget status changes what its transactions are worth in the
+ * budget (docs/multi-currency M5, M8), so every figure built from them is refreshed
+ */
 function movesBudgetFigures(data: AccountUpdate): boolean {
   return 'currency' in data || 'isOffBudget' in data;
 }

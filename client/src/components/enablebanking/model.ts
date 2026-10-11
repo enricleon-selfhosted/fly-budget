@@ -3,10 +3,12 @@ import type {
   Account,
   AccountType,
   EnableBankingAccount,
+  EnableBankingConnection,
   EnableBankingMappingAction,
+  EnableBankingMappingResult,
   EnableBankingSyncResult,
 } from '../../types';
-import { accountTypeInfo } from '../../utils/accountTypes';
+import { startsOffBudget } from '../../utils/accountTypes';
 import { accountCurrency } from '../../utils/budgetCurrency';
 
 // Pure logic for the Enable Banking screens: no requests, no store, no clock (the caller
@@ -99,11 +101,6 @@ export function bankCurrency(account: Pick<EnableBankingAccount, 'currency'>, bu
   return accountCurrency(account, budget);
 }
 
-/** The default for "Off budget": cash and credit accounts are on budget, the rest off */
-export function defaultOffBudget(type: AccountType, foreign: boolean): boolean {
-  return foreign || !accountTypeInfo(type).onBudget;
-}
-
 export type MappingAction = 'create' | 'link' | 'skip';
 
 /** One bank account's choice in the mapping form */
@@ -113,7 +110,7 @@ export interface MappingRow {
   name: string;
   /** New account: its type */
   type: AccountType;
-  /** New account: off budget (always, for another currency) */
+  /** New account: off budget (starts ticked for another currency, M1, but can be unticked) */
   offBudget: boolean;
   /** Existing account: the FlyBudget account ('' = none chosen yet) */
   accountId: string;
@@ -131,7 +128,7 @@ export function initialMappingRow(
   const base = {
     name: account.name,
     type: account.suggestedType,
-    offBudget: defaultOffBudget(account.suggestedType, foreign),
+    offBudget: startsOffBudget(account.suggestedType, foreign),
   };
   if (account.accountId) {
     return {
@@ -211,7 +208,6 @@ export function linkOptions(
 export function mappingAction(
   account: EnableBankingAccount,
   row: MappingRow,
-  budget: string,
 ): EnableBankingMappingAction | null {
   if (row.action === 'skip') return { id: account.id, action: 'skip' };
   if (row.action === 'link') {
@@ -225,13 +221,12 @@ export function mappingAction(
   }
   const accountName = row.name.trim();
   if (!accountName) return null;
-  const foreign = bankCurrency(account, budget) !== budget;
   return {
     id: account.id,
     action: 'create',
     accountName,
     accountType: row.type,
-    isOffBudget: foreign || row.offBudget ? 1 : 0,
+    isOffBudget: row.offBudget ? 1 : 0,
     syncFrom: row.syncFrom || undefined,
   };
 }
@@ -245,6 +240,72 @@ export function accessLeft(
   if (!isValid(end)) return null;
   const ms = end.getTime() - now.getTime();
   return { expired: ms <= 0, days: Math.floor(ms / DAY_MS) };
+}
+
+export interface AccessStatus {
+  /** Whole days left, or null when the end date isn't a valid time */
+  daysLeft: number | null;
+  expired: boolean;
+  /** Ends within RENEW_WARNING_DAYS */
+  expiresSoon: boolean;
+  /** The bank asked for a renewal, access ended, or it ends soon */
+  renewNeeded: boolean;
+  /** "Access until Oct 24, 2026 (14 days left)", or null when the end date isn't a valid time */
+  text: string | null;
+}
+
+/** Where a connection's access stands, and what its card says about it */
+export function accessStatus(
+  connection: Pick<EnableBankingConnection, 'validUntil' | 'syncStatus'>,
+  now: Date,
+): AccessStatus {
+  const access = accessLeft(connection.validUntil, now);
+  const expired = access?.expired === true;
+  const expiresSoon = access !== null && !expired && access.days < RENEW_WARNING_DAYS;
+  const renewNeeded = connection.syncStatus === 'reauth_required' || expired || expiresSoon;
+  let text: string | null = null;
+  if (access) {
+    const until = format(new Date(connection.validUntil), 'MMM d, yyyy');
+    if (expired) text = `Access ended ${until}`;
+    else if (expiresSoon) {
+      text = `Access until ${until} (${access.days >= 1 ? `${plural(access.days, 'day')} left` : 'ends today'})`;
+    } else text = `Access until ${until}`;
+  }
+  return { daysLeft: access?.days ?? null, expired, expiresSoon, renewNeeded, text };
+}
+
+/**
+ * The bank accounts to ask about once the user consented at the bank. Renewing, only the ones the
+ * bank added since: the others are already imported or ignored.
+ */
+export function accountsToMapAfterConsent(
+  accounts: readonly EnableBankingAccount[],
+  renewing: boolean,
+): EnableBankingAccount[] {
+  return renewing ? accounts.filter((a) => a.accountId === null && a.isEnabled) : [...accounts];
+}
+
+/** What the connect dialog does next: ask about accounts, import transactions, or finish */
+export type NextStep = 'accounts' | 'sync' | 'done';
+
+/**
+ * After consent: ask about the accounts to map; with none, a renewal imports straight away (its
+ * accounts are already set up) and a new connection finishes.
+ */
+export function stepAfterConsent(accountsToMap: number, renewing: boolean): NextStep {
+  if (accountsToMap > 0) return 'accounts';
+  return renewing ? 'sync' : 'done';
+}
+
+/**
+ * After the accounts are saved: import their transactions. A new connection with nothing imported
+ * finishes instead; a renewal always syncs, since its earlier accounts are set up.
+ */
+export function stepAfterMapping(
+  result: Pick<EnableBankingMappingResult, 'created' | 'linked'>,
+  renewing: boolean,
+): Exclude<NextStep, 'accounts'> {
+  return result.created + result.linked === 0 && !renewing ? 'done' : 'sync';
 }
 
 /** "1 account", "2 accounts" */

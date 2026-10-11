@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tansta
 import * as txApi from '../api/transactions';
 import { useUndoStore } from '../store/undoStore';
 import type { Transaction, TransactionQueryParams } from '../types';
+import { refreshBudgetFigures } from './budgetFigures';
 
 function findTxInCache(qc: QueryClient, id: string): Transaction | undefined {
   const caches = qc.getQueriesData<Transaction[]>({ queryKey: ['transactions'] });
@@ -9,20 +10,6 @@ function findTxInCache(qc: QueryClient, id: string): Transaction | undefined {
     const found = data?.find((t) => t.id === id);
     if (found) return found;
   }
-}
-
-/** Budget and report figures that a transaction's amount, date, category or value moves */
-const FIGURE_KEYS = [
-  'budget',
-  'budget-summary',
-  'reports',
-  'category-history',
-  'dashboards',
-  'currencies',
-];
-
-function refreshFigures(qc: QueryClient) {
-  for (const key of FIGURE_KEYS) qc.invalidateQueries({ queryKey: [key] });
 }
 
 export function useTransactions(params: TransactionQueryParams = {}) {
@@ -78,9 +65,8 @@ export function useUpdateTransaction() {
       return { old: findTxInCache(qc, id) };
     },
     onSuccess: (_, { id, data }, ctx) => {
-      qc.invalidateQueries({ queryKey: ['transactions'] });
-      qc.invalidateQueries({ queryKey: ['accounts'] });
-      refreshFigures(qc);
+      // Its amount, date, category or value moves budget and report figures
+      refreshBudgetFigures(qc);
       if (!ctx?.old) return;
       const snapshot = ctx.old;
       const valueChanged = data.budgetAmount !== undefined;
@@ -103,15 +89,11 @@ export function useUpdateTransaction() {
                 }
               : {}),
           });
-          qc.invalidateQueries({ queryKey: ['transactions'] });
-          qc.invalidateQueries({ queryKey: ['accounts'] });
-          refreshFigures(qc);
+          refreshBudgetFigures(qc);
         },
         redo: async () => {
           await txApi.updateTransaction(id, data);
-          qc.invalidateQueries({ queryKey: ['transactions'] });
-          qc.invalidateQueries({ queryKey: ['accounts'] });
-          refreshFigures(qc);
+          refreshBudgetFigures(qc);
         },
       });
     },
@@ -163,18 +145,19 @@ export function useTransferCandidates(id: string | null, enabled: boolean) {
   });
 }
 
-/** Two existing transactions become one transfer (or an exchange, across currencies) */
+/**
+ * Two existing transactions become one transfer (or an exchange, across currencies, which also
+ * sets the rate they're converted at); the payees and budget figures change with it
+ */
 export function useLinkTransfer() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, otherId }: { id: string; otherId: string }) =>
       txApi.linkTransfer(id, otherId),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['transactions'] });
-      qc.invalidateQueries({ queryKey: ['accounts'] });
+      refreshBudgetFigures(qc);
       qc.invalidateQueries({ queryKey: ['payees'] });
-      qc.invalidateQueries({ queryKey: ['budget'] });
-      qc.invalidateQueries({ queryKey: ['budget-summary'] });
+      qc.invalidateQueries({ queryKey: ['transfer-candidates'] });
     },
   });
 }
@@ -185,11 +168,9 @@ export function useUnlinkTransfer() {
   return useMutation({
     mutationFn: (id: string) => txApi.unlinkTransfer(id),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['transactions'] });
-      qc.invalidateQueries({ queryKey: ['accounts'] });
+      refreshBudgetFigures(qc);
       qc.invalidateQueries({ queryKey: ['payees'] });
-      qc.invalidateQueries({ queryKey: ['budget'] });
-      qc.invalidateQueries({ queryKey: ['budget-summary'] });
+      qc.invalidateQueries({ queryKey: ['transfer-candidates'] });
     },
   });
 }
@@ -211,15 +192,14 @@ export function useCreateTransfer() {
   return useMutation({
     mutationFn: txApi.createTransfer,
     onSuccess: (created) => {
-      qc.invalidateQueries({ queryKey: ['transactions'] });
-      qc.invalidateQueries({ queryKey: ['accounts'] });
+      // An exchange or a transfer across the budget's edge (with a category) moves budget figures
+      refreshBudgetFigures(qc);
       const ids = created.map((t) => t.id);
       useUndoStore.getState().push({
         description: `Create transfer`,
         undo: async () => {
           for (const id of ids) await txApi.deleteTransaction(id);
-          qc.invalidateQueries({ queryKey: ['transactions'] });
-          qc.invalidateQueries({ queryKey: ['accounts'] });
+          refreshBudgetFigures(qc);
         },
         redo: async () => {
           if (created.length >= 2) {
@@ -234,8 +214,7 @@ export function useCreateTransfer() {
               notes: created[0].notes,
             });
           }
-          qc.invalidateQueries({ queryKey: ['transactions'] });
-          qc.invalidateQueries({ queryKey: ['accounts'] });
+          refreshBudgetFigures(qc);
         },
       });
     },

@@ -3,17 +3,21 @@ import fc from 'fast-check';
 import type { Account, EnableBankingAccount } from '../../types';
 import {
   EEA_COUNTRIES,
+  RENEW_WARNING_DAYS,
   accessLeft,
+  accessStatus,
+  accountsToMapAfterConsent,
   bankCurrency,
   daysAgoIso,
   defaultCountry,
-  defaultOffBudget,
   describeSync,
   initialMappingRow,
   isHttpsUrl,
   linkOptions,
   mappingAction,
   psuOptions,
+  stepAfterConsent,
+  stepAfterMapping,
   withAction,
   withLinkedAccount,
 } from './model';
@@ -110,7 +114,7 @@ describe('initialMappingRow', () => {
     expect(row.offBudget).toBe(true);
   });
 
-  it('keeps an account in another currency off budget', () => {
+  it('starts an account in another currency off budget (M1)', () => {
     const row = initialMappingRow(bankAccount({ currency: 'USD' }), 'EUR', NOW);
     expect(row.offBudget).toBe(true);
     expect(bankCurrency(bankAccount({ currency: 'USD' }), 'EUR')).toBe('USD');
@@ -118,20 +122,11 @@ describe('initialMappingRow', () => {
   });
 });
 
-describe('defaultOffBudget', () => {
-  it('is on budget only for cash and credit types, unless the currency is foreign', () => {
-    expect(defaultOffBudget('savings', false)).toBe(false);
-    expect(defaultOffBudget('credit', false)).toBe(false);
-    expect(defaultOffBudget('mortgage', false)).toBe(true);
-    expect(defaultOffBudget('checking', true)).toBe(true);
-  });
-});
-
 describe('mappingAction', () => {
   it('sends a skip with no details', () => {
     const acc = bankAccount();
     const row = initialMappingRow(acc, 'EUR', NOW);
-    expect(mappingAction(acc, { ...row, action: 'skip' }, 'EUR')).toEqual({
+    expect(mappingAction(acc, { ...row, action: 'skip' })).toEqual({
       id: 'bank-1',
       action: 'skip',
     });
@@ -140,8 +135,8 @@ describe('mappingAction', () => {
   it('needs a name for a new account and trims it', () => {
     const acc = bankAccount();
     const row = initialMappingRow(acc, 'EUR', NOW);
-    expect(mappingAction(acc, { ...row, name: '   ' }, 'EUR')).toBeNull();
-    expect(mappingAction(acc, { ...row, name: '  Main  ' }, 'EUR')).toMatchObject({
+    expect(mappingAction(acc, { ...row, name: '   ' })).toBeNull();
+    expect(mappingAction(acc, { ...row, name: '  Main  ' })).toMatchObject({
       action: 'create',
       accountName: 'Main',
       isOffBudget: 0,
@@ -149,18 +144,33 @@ describe('mappingAction', () => {
     });
   });
 
-  it('sends 1 for off budget, and forces it for another currency', () => {
+  it('starts off budget for another currency, and can be put on budget', () => {
     const acc = bankAccount({ currency: 'USD' });
     const row = initialMappingRow(acc, 'EUR', NOW);
-    expect(mappingAction(acc, row, 'EUR')).toMatchObject({ isOffBudget: 1 });
+    expect(mappingAction(acc, row)).toMatchObject({ isOffBudget: 1 });
+    expect(mappingAction(acc, { ...row, offBudget: false })).toMatchObject({ isOffBudget: 0 });
+  });
+
+  it('sends the Off budget box as it is, for any account', () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom(null, 'EUR', 'USD', 'GBP'),
+        fc.boolean(),
+        (currency, offBudget) => {
+          const acc = bankAccount({ currency });
+          const row = { ...initialMappingRow(acc, 'EUR', NOW), offBudget };
+          expect(mappingAction(acc, row)).toMatchObject({ isOffBudget: offBudget ? 1 : 0 });
+        },
+      ),
+    );
   });
 
   it('needs an existing account to link to, and leaves the date to the server when empty', () => {
     const acc = bankAccount();
     const row = initialMappingRow(acc, 'EUR', NOW);
     const linking = withAction(row, acc, 'link', NOW);
-    expect(mappingAction(acc, linking, 'EUR')).toBeNull();
-    expect(mappingAction(acc, { ...linking, accountId: 'acc-9' }, 'EUR')).toEqual({
+    expect(mappingAction(acc, linking)).toBeNull();
+    expect(mappingAction(acc, { ...linking, accountId: 'acc-9' })).toEqual({
       id: 'bank-1',
       action: 'link',
       accountId: 'acc-9',
@@ -227,6 +237,142 @@ describe('accessLeft', () => {
 
   it('is unknown for an invalid date', () => {
     expect(accessLeft('not a date', NOW)).toBeNull();
+  });
+});
+
+describe('accessStatus', () => {
+  const inDays = (days: number) => new Date(NOW.getTime() + days * DAY_MS).toISOString();
+  const syncStatus = fc.constantFrom('good', 'syncing', 'error', 'reauth_required') as fc.Arbitrary<
+    'good' | 'syncing' | 'error' | 'reauth_required'
+  >;
+
+  it('says until when access lasts, and warns in the last two weeks', () => {
+    expect(accessStatus({ validUntil: inDays(60.25), syncStatus: 'good' }, NOW)).toMatchObject({
+      daysLeft: 60,
+      expired: false,
+      expiresSoon: false,
+      renewNeeded: false,
+      text: 'Access until Dec 9, 2026',
+    });
+    expect(accessStatus({ validUntil: inDays(3.25), syncStatus: 'good' }, NOW)).toMatchObject({
+      expiresSoon: true,
+      renewNeeded: true,
+      text: 'Access until Oct 13, 2026 (3 days left)',
+    });
+    expect(accessStatus({ validUntil: inDays(0.25), syncStatus: 'good' }, NOW).text).toBe(
+      'Access until Oct 10, 2026 (ends today)',
+    );
+  });
+
+  it('says when access ended', () => {
+    expect(accessStatus({ validUntil: inDays(-2), syncStatus: 'good' }, NOW)).toMatchObject({
+      expired: true,
+      expiresSoon: false,
+      renewNeeded: true,
+      text: 'Access ended Oct 8, 2026',
+    });
+  });
+
+  it('says nothing about an end date that is not a valid time, unless the bank asks to renew', () => {
+    expect(accessStatus({ validUntil: 'not a date', syncStatus: 'good' }, NOW)).toEqual({
+      daysLeft: null,
+      expired: false,
+      expiresSoon: false,
+      renewNeeded: false,
+      text: null,
+    });
+    expect(
+      accessStatus({ validUntil: 'not a date', syncStatus: 'reauth_required' }, NOW).renewNeeded,
+    ).toBe(true);
+  });
+
+  it('needs a renewal exactly when the bank asks, access ended, or it ends soon', () => {
+    fc.assert(
+      fc.property(fc.double({ min: -400, max: 400, noNaN: true }), syncStatus, (days, status) => {
+        const access = accessStatus({ validUntil: inDays(days), syncStatus: status }, NOW);
+        const left = accessLeft(inDays(days), NOW)!;
+        expect(access.daysLeft).toBe(left.days);
+        expect(access.expired).toBe(left.expired);
+        expect(access.expiresSoon).toBe(!left.expired && left.days < RENEW_WARNING_DAYS);
+        expect(access.renewNeeded).toBe(
+          status === 'reauth_required' || access.expired || access.expiresSoon,
+        );
+        expect(access.expired && access.expiresSoon).toBe(false);
+        expect(access.text).not.toBeNull();
+      }),
+    );
+  });
+});
+
+describe('after consent', () => {
+  const shared = [
+    bankAccount({ id: 'imported', accountId: 'local-1' }),
+    bankAccount({ id: 'ignored', isEnabled: false }),
+    bankAccount({ id: 'new' }),
+  ];
+
+  it('asks about every account of a new connection', () => {
+    expect(accountsToMapAfterConsent(shared, false).map((a) => a.id)).toEqual([
+      'imported',
+      'ignored',
+      'new',
+    ]);
+  });
+
+  it('asks a renewal only about accounts the bank added since', () => {
+    expect(accountsToMapAfterConsent(shared, true).map((a) => a.id)).toEqual(['new']);
+  });
+
+  it('a renewal never asks about an account already imported or ignored', () => {
+    fc.assert(
+      fc.property(
+        fc.array(
+          fc.record({
+            accountId: fc.option(fc.constant('local-1'), { nil: null }),
+            isEnabled: fc.boolean(),
+          }),
+          { maxLength: 10 },
+        ),
+        (rows) => {
+          const accounts = rows.map((r, i) => bankAccount({ ...r, id: `bank-${i}` }));
+          const toMap = accountsToMapAfterConsent(accounts, true);
+          for (const a of toMap) expect(a.accountId === null && a.isEnabled).toBe(true);
+          expect(toMap.length).toBe(
+            accounts.filter((a) => a.accountId === null && a.isEnabled).length,
+          );
+          expect(accountsToMapAfterConsent(accounts, false)).toEqual(accounts);
+        },
+      ),
+    );
+  });
+
+  it('maps accounts when there are some; otherwise a renewal syncs and a new connection ends', () => {
+    expect(stepAfterConsent(2, false)).toBe('accounts');
+    expect(stepAfterConsent(1, true)).toBe('accounts');
+    expect(stepAfterConsent(0, true)).toBe('sync');
+    expect(stepAfterConsent(0, false)).toBe('done');
+  });
+});
+
+describe('stepAfterMapping', () => {
+  it('syncs once something was imported, and a renewal always syncs', () => {
+    fc.assert(
+      fc.property(
+        fc.nat({ max: 20 }),
+        fc.nat({ max: 20 }),
+        fc.boolean(),
+        (created, linked, renewing) => {
+          expect(stepAfterMapping({ created, linked }, renewing)).toBe(
+            created + linked > 0 || renewing ? 'sync' : 'done',
+          );
+        },
+      ),
+    );
+  });
+
+  it('ends a new connection where nothing was imported', () => {
+    expect(stepAfterMapping({ created: 0, linked: 0 }, false)).toBe('done');
+    expect(stepAfterMapping({ created: 0, linked: 0 }, true)).toBe('sync');
   });
 });
 
