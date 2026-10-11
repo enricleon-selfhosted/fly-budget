@@ -2,6 +2,7 @@ import {
   sqliteTable,
   text,
   integer,
+  real,
   uniqueIndex,
   index,
   customType,
@@ -28,7 +29,7 @@ export const accounts = sqliteTable('accounts', {
   logo: text('logo'),
   /**
    * ISO 4217 code, set only when the account's currency differs from the budget's (null = the
-   * budget currency). Such accounts stay off budget and out of net worth totals.
+   * budget currency). Their transactions are converted at a rate (docs/multi-currency).
    */
   currency: text('currency'),
   createdAt: text('created_at')
@@ -99,6 +100,13 @@ export const transactions = sqliteTable(
      */
     isAdjustment: integer('is_adjustment').notNull().default(0),
     scheduleId: text('schedule_id').references(() => schedules.id, { onDelete: 'set null' }),
+    /**
+     * Accounts in another currency only: the rate from the account's currency to the budget's
+     * that this transaction is converted at (null = no rate yet). See services/fx/.
+     */
+    fxRate: real('fx_rate'),
+    /** Where `fx_rate` came from: `manual`, `exchange` or `rate` (FX_SOURCES) */
+    fxSource: text('fx_source'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`(datetime('now'))`),
@@ -458,6 +466,38 @@ export const enableBankingAccounts = sqliteTable(
   (table) => [
     uniqueIndex('enable_banking_account_unique').on(table.connectionId, table.identificationHash),
   ],
+);
+
+// --- Currencies ---
+
+/** Settings of the budget as a whole. A single row, `id = 'budget'`. */
+export const budgetSettings = sqliteTable('budget_settings', {
+  id: text('id').primaryKey(),
+  /** ISO 4217 code of the budget's currency; null until a client first sends it */
+  currency: text('currency'),
+  /** 1 = download daily rates from the European Central Bank (through Frankfurter) */
+  downloadRates: integer('download_rates').notNull().default(0),
+  /** When rates were last downloaded successfully */
+  ratesUpdatedAt: text('rates_updated_at'),
+  /** Why the last download failed (a code, see services/fx/), null when it worked */
+  ratesError: text('rates_error'),
+});
+
+/**
+ * Daily exchange rates: 1 `base` = `rate` `quote`. The id is `<base><quote>:<date>`, so two
+ * devices storing the same rate store the same row. `source` is `ecb` (downloaded) or `manual`.
+ */
+export const exchangeRates = sqliteTable(
+  'exchange_rates',
+  {
+    id: text('id').primaryKey(),
+    date: text('date').notNull(),
+    base: text('base').notNull(),
+    quote: text('quote').notNull(),
+    rate: real('rate').notNull(),
+    source: text('source').notNull(),
+  },
+  (table) => [index('exchange_rates_pair_date_idx').on(table.base, table.quote, table.date)],
 );
 
 // --- Server mode (self-hosted / Docker) login ---
