@@ -20,6 +20,7 @@ import {
   dismissMatchSuggestion,
   getMatchSuggestions,
 } from '../services/matchingEngine.js';
+import { afterTransactionsWritten } from '../services/transactionFx.js';
 import { MAX_DATE_FLEXIBILITY } from '../services/scheduleMatching.js';
 
 export const schedulesRouter = Router();
@@ -512,6 +513,7 @@ schedulesRouter.post('/:id/mark-paid', (req, res) => {
   };
 
   db.insert(transactions).values(tx).run();
+  afterTransactionsWritten([txId]);
   linkOccurrenceToTransaction(occId, txId, 'manual', 100);
 
   res.status(201).json(tx);

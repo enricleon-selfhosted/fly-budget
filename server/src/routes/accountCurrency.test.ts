@@ -4,6 +4,7 @@ import type { AddressInfo } from 'net';
 import type { Server } from 'http';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { db } from '../db/index.js';
+import { saveBudgetSettings } from '../services/fx/settings.js';
 import { accountsRouter } from './accounts.js';
 
 // Accounts in another currency than the budget's keep it, and stay off budget. Its own file, so
@@ -51,14 +52,15 @@ describe('account currency', () => {
     expect(body.isOffBudget).toBe(1);
   });
 
-  it('refuses to put an account in another currency on budget', async () => {
+  it('an account in another currency can be on budget, from the start or later (M1)', async () => {
     const created = await send('POST', '/accounts', {
       name: 'GBP',
       type: 'savings',
       currency: 'GBP',
       isOffBudget: 0,
     });
-    expect(created.status).toBe(400);
+    expect(created.status).toBe(201);
+    expect(created.body).toMatchObject({ currency: 'GBP', isOffBudget: 0 });
 
     const { body: account } = await send('POST', '/accounts', {
       name: 'CHF',
@@ -66,18 +68,16 @@ describe('account currency', () => {
       currency: 'CHF',
     });
     const updated = await send('PUT', `/accounts/${account.id}`, { isOffBudget: 0 });
-    expect(updated.status).toBe(400);
+    expect(updated.body).toMatchObject({ currency: 'CHF', isOffBudget: 0 });
   });
 
-  it('giving an on-budget account another currency takes it off budget; clearing it does not put it back', async () => {
+  it('changing an account’s currency keeps it on or off budget', async () => {
     const { body: account } = await send('POST', '/accounts', { name: 'Wallet', type: 'cash' });
     const foreign = await send('PUT', `/accounts/${account.id}`, { currency: 'SEK' });
-    expect(foreign.body).toMatchObject({ currency: 'SEK', isOffBudget: 1 });
+    expect(foreign.body).toMatchObject({ currency: 'SEK', isOffBudget: 0 });
 
     const back = await send('PUT', `/accounts/${account.id}`, { currency: null });
-    expect(back.body).toMatchObject({ currency: null, isOffBudget: 1 });
-    const onBudget = await send('PUT', `/accounts/${account.id}`, { isOffBudget: 0 });
-    expect(onBudget.body.isOffBudget).toBe(0);
+    expect(back.body).toMatchObject({ currency: null, isOffBudget: 0 });
   });
 
   it.each(['eur', 'EURO', 'E1R', ''])('rejects %j as a currency', async (currency) => {
@@ -93,5 +93,33 @@ describe('account currency', () => {
     });
     const { body } = await send('PUT', `/accounts/${account.id}`, { name: 'Norway' });
     expect(body).toMatchObject({ name: 'Norway', currency: 'NOK', isOffBudget: 1 });
+  });
+});
+
+describe('the budget’s own currency (null = the budget’s, M2)', () => {
+  it('an account created in it keeps none, and follows the usual budget rules', async () => {
+    saveBudgetSettings({ currency: 'EUR' });
+    const { status, body } = await send('POST', '/accounts', {
+      name: 'Euros',
+      type: 'checking',
+      currency: 'EUR',
+    });
+    expect(status).toBe(201);
+    expect(body).toMatchObject({ currency: null, isOffBudget: 0 });
+    expect(body).not.toHaveProperty('budgetBalance');
+  });
+
+  it('an account changed to it keeps none', async () => {
+    saveBudgetSettings({ currency: 'EUR' });
+    const { body: account } = await send('POST', '/accounts', {
+      name: 'Pounds',
+      type: 'savings',
+      currency: 'GBP',
+    });
+    const { status, body } = await send('PUT', `/accounts/${account.id}`, { currency: 'EUR' });
+    expect(status).toBe(200);
+    expect(body).toMatchObject({ currency: null, transfersUncategorized: 0 });
+    const { body: list } = await send('GET', '/accounts');
+    expect(list.find((a: { id: string }) => a.id === account.id).currency).toBeNull();
   });
 });
