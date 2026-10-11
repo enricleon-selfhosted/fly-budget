@@ -5,9 +5,10 @@ import {
   scheduleMatchDismissals,
   transactions,
 } from '../db/schema.js';
-import { eq, and, gte, lte, isNull } from 'drizzle-orm';
+import { eq, and, gte, lte, isNull, inArray } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { format, parseISO, addDays, subDays } from 'date-fns';
+import { MAX_DATE_FLEXIBILITY, pickImportMatches, scoreMatch } from './scheduleMatching.js';
 
 export function linkOccurrenceToTransaction(
   occurrenceId: string,
@@ -89,77 +90,6 @@ export function unlinkOccurrenceByTransactionId(transactionId: string): void {
     .run();
 }
 
-function scoreMatch(
-  tx: {
-    date: string;
-    amount: number;
-    payeeId: string | null;
-    payeeName: string | null;
-    accountId: string;
-  },
-  occ: { expectedDate: string; expectedAmount: number },
-  schedule: {
-    amount: number;
-    amountType: string;
-    dateFlexibility: number;
-    payeeId: string | null;
-    accountId: string | null;
-    name: string;
-  },
-): { score: number; payeeScore: number } {
-  const txDate = parseISO(tx.date);
-  const occDate = parseISO(occ.expectedDate);
-  const daysDiff = Math.abs(txDate.getTime() - occDate.getTime()) / (24 * 60 * 60 * 1000);
-
-  if (daysDiff > schedule.dateFlexibility) return { score: 0, payeeScore: 0 };
-
-  let dateScore = Math.max(0, 30 - daysDiff * 5);
-
-  let amountScore = 0;
-  const amountDiff = Math.abs(tx.amount - occ.expectedAmount);
-  const absExpected = Math.abs(occ.expectedAmount);
-
-  switch (schedule.amountType) {
-    case 'exact':
-      amountScore = amountDiff === 0 ? 30 : 0;
-      break;
-    case 'approximate':
-      if (amountDiff === 0) amountScore = 30;
-      else if (absExpected > 0 && amountDiff / absExpected <= 0.1) amountScore = 20;
-      else amountScore = 0;
-      break;
-    case 'variable':
-      if (amountDiff === 0) amountScore = 30;
-      else if (absExpected > 0 && amountDiff / absExpected <= 0.25) amountScore = 10;
-      else amountScore = 0;
-      break;
-    default:
-      amountScore = amountDiff === 0 ? 30 : 0;
-  }
-
-  if (amountScore === 0) return { score: 0, payeeScore: 0 };
-
-  let payeeScore = 0;
-  if (schedule.payeeId && tx.payeeId === schedule.payeeId) {
-    payeeScore = 25;
-  } else if (schedule.payeeId && tx.payeeName && schedule.name) {
-    const txNameLower = tx.payeeName.toLowerCase();
-    const schedNameLower = schedule.name.toLowerCase();
-    if (txNameLower.includes(schedNameLower) || schedNameLower.includes(txNameLower)) {
-      payeeScore = 15;
-    }
-  }
-
-  let accountScore = 0;
-  if (schedule.accountId && tx.accountId === schedule.accountId) {
-    accountScore = 15;
-  } else if (!schedule.accountId) {
-    accountScore = 5;
-  }
-
-  return { score: dateScore + amountScore + payeeScore + accountScore, payeeScore };
-}
-
 export interface MatchSuggestion {
   occurrenceId: string;
   scheduleId: string;
@@ -169,6 +99,8 @@ export interface MatchSuggestion {
   expectedAmount: number;
   candidates: {
     transactionId: string;
+    /** Amounts are in this account's currency */
+    accountId: string;
     date: string;
     amount: number;
     payeeName: string | null;
@@ -222,8 +154,9 @@ export function getMatchSuggestions(): MatchSuggestion[] {
     const candidateTxns: MatchSuggestion['candidates'] = [];
 
     for (const tx of nearbyTxns) {
-      if (schedule.amount < 0 && tx.amount > 0) continue;
-      if (schedule.amount > 0 && tx.amount < 0) continue;
+      // The score decides everything about the fit, direction included (scoreMatch)
+      const { score } = scoreMatch(tx, occ, schedule);
+      if (score < 40) continue;
 
       const dismissed = db
         .select()
@@ -237,16 +170,14 @@ export function getMatchSuggestions(): MatchSuggestion[] {
         .get();
       if (dismissed) continue;
 
-      const { score } = scoreMatch(tx, occ, schedule);
-      if (score >= 40) {
-        candidateTxns.push({
-          transactionId: tx.id,
-          date: tx.date,
-          amount: tx.amount,
-          payeeName: tx.payeeName,
-          score,
-        });
-      }
+      candidateTxns.push({
+        transactionId: tx.id,
+        accountId: tx.accountId,
+        date: tx.date,
+        amount: tx.amount,
+        payeeName: tx.payeeName,
+        score,
+      });
     }
 
     if (candidateTxns.length > 0) {
@@ -279,4 +210,57 @@ export function dismissMatchSuggestion(occurrenceId: string, transactionId: stri
     if (e.message?.includes('UNIQUE constraint failed')) return;
     throw e;
   }
+}
+
+/**
+ * Matches just-imported transactions to pending occurrences of active recurring items when it
+ * is clear (decision D29, pickImportMatches). Returns how many were matched.
+ */
+export function autoMatchImported(transactionIds: readonly string[]): number {
+  if (!transactionIds.length) return 0;
+  const txs = db
+    .select()
+    .from(transactions)
+    .where(
+      and(
+        inArray(transactions.id, [...transactionIds]),
+        isNull(transactions.scheduleId),
+        isNull(transactions.transferTransactionId),
+        isNull(transactions.parentTransactionId),
+      ),
+    )
+    .all();
+  if (!txs.length) return 0;
+  const dates = txs.map((t) => t.date).sort();
+  // Any item's date flexibility is within this window
+  const from = format(subDays(parseISO(dates[0]), MAX_DATE_FLEXIBILITY), 'yyyy-MM-dd');
+  const to = format(addDays(parseISO(dates[dates.length - 1]), MAX_DATE_FLEXIBILITY), 'yyyy-MM-dd');
+  const accountIds = [...new Set(txs.map((t) => t.accountId))];
+
+  const pending = db
+    .select({ occ: scheduleOccurrences, schedule: schedules })
+    .from(scheduleOccurrences)
+    .innerJoin(schedules, eq(scheduleOccurrences.scheduleId, schedules.id))
+    .where(
+      and(
+        eq(scheduleOccurrences.status, 'pending'),
+        eq(schedules.status, 'active'),
+        inArray(schedules.accountId, accountIds),
+        gte(scheduleOccurrences.expectedDate, from),
+        lte(scheduleOccurrences.expectedDate, to),
+      ),
+    )
+    .all()
+    .map(({ occ, schedule }) => ({
+      id: occ.id,
+      expectedDate: occ.expectedDate,
+      expectedAmount: occ.expectedAmount,
+      schedule,
+    }));
+
+  const matches = pickImportMatches(txs, pending);
+  for (const m of matches) {
+    linkOccurrenceToTransaction(m.occurrenceId, m.transactionId, 'automatic', m.score);
+  }
+  return matches.length;
 }
