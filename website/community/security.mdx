@@ -42,7 +42,7 @@ The [OpenSSF Scorecard](https://openssf.org/projects/scorecard/) is an independe
 
 FlyBudget is **local-first**. Your budget lives in a database file on your own computer, and the app talks to its own small built-in server that only listens on your machine (`127.0.0.1`). There is no FlyBudget cloud to be breached, no account to be phished, and no analytics.
 
-The only time FlyBudget talks to the internet is when bank sync connects to **Plaid** or **SimpleFIN** on your behalf, always over encrypted HTTPS.
+The only time FlyBudget talks to the internet is when bank sync connects to **Plaid**, **SimpleFIN** or **Enable Banking** on your behalf, always over encrypted HTTPS.
 
 ## If you host FlyBudget yourself
 
@@ -74,9 +74,19 @@ Use HTTPS (through a reverse proxy like Caddy) before making your server reachab
 - **Bank data is double-checked.** Everything SimpleFIN sends is validated before it's saved, and amounts are converted to exact cents, so malformed data can't corrupt your budget.
 - **Disconnecting:** SimpleFIN doesn't offer a way for apps to revoke access, so FlyBudget deletes its copy and reminds you to also remove the app in your [SimpleFIN Bridge](https://bridge.simplefin.org) account.
 
+### Enable Banking
+
+- **You approve the connection on your bank's own page,** in your web browser. Your bank password never passes through FlyBudget.
+- **You use your own application,** so there's no FlyBudget service in the middle: it's you, Enable Banking and your bank.
+- **Your private key and bank sessions are encrypted** with the same AES-256-GCM encryption before they're saved. They're never sent to the app's screen, and they're left out of backups.
+- **The bank's callback is protected by a one-time `state` value.** FlyBudget only accepts the page your bank sends you back to if it carries a `state` that FlyBudget made: 256 random bits, valid for 30 minutes, usable once, and checked in constant time.
+- **Bank data is checked.** Everything Enable Banking sends is validated before it's used, dates must be real calendar dates, amounts are converted to exact cents, and names are stripped of control characters and shortened.
+- **A fixed address, with timeouts.** FlyBudget only talks to Enable Banking's own API address, which isn't taken from your settings or from the bank. Every request has a timeout and every response has a size limit.
+- **Disconnecting really disconnects.** FlyBudget ends the bank session at Enable Banking before it forgets the connection. If Enable Banking can't be reached at that moment, FlyBudget keeps the connection and asks you to try again.
+
 ## Encryption
 
-Your most sensitive secrets (your Plaid keys, your Plaid access tokens, and your SimpleFIN access) are encrypted with **AES-256-GCM**, the same standard used by banks and governments. The encryption key itself is protected by your operating system (Windows DPAPI, the macOS Keychain, or the Linux secret service), so it only works for your user account on your computer. This applies to the FlyBudget desktop app; on a system without OS secure storage (for example some Linux setups without a keyring), credentials are stored without this extra layer.
+Your most sensitive secrets (your Plaid keys, your Plaid access tokens, your SimpleFIN access, and your Enable Banking private key and bank sessions) are encrypted with **AES-256-GCM**, the same standard used by banks and governments. The encryption key itself is protected by your operating system (Windows DPAPI, the macOS Keychain, or the Linux secret service), so it only works for your user account on your computer. This applies to the FlyBudget desktop app; on a system without OS secure storage (for example some Linux setups without a keyring), credentials are stored without this extra layer.
 
 That means a copied or backed-up database file **does not** give anyone access to your bank accounts.
 
@@ -139,7 +149,7 @@ No software can promise to be perfectly secure, and we'd rather be upfront than 
 
 - Anyone who can log in to your computer as you can see your budget. Full-disk encryption and a strong login password are your best protection.
 - FlyBudget is a young project, built by one developer today and growing. As more contributors join, we look forward to adding more reviewers and, down the road, independent security audits.
-- Plaid and SimpleFIN are separate services with their own security. Issues with them should be reported to them directly.
+- Plaid, SimpleFIN and Enable Banking are separate services with their own security. Issues with them should be reported to them directly.
 
 ## Report a vulnerability
 

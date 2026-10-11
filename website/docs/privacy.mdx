@@ -29,6 +29,13 @@ Only bank sync talks to the internet, and only if you set it up:
   bank password.
 - Their access tokens are encrypted on your computer or server and never shown to the app's
   page. They're left out of backups.
+- **Enable Banking** passes your accounts and transactions from your bank to FlyBudget over HTTPS,
+  so it sees them while they pass through. FlyBudget talks to Enable Banking directly, with your own
+  Enable Banking application, so there's no FlyBudget service in between. You approve the
+  connection on your bank's page, never inside FlyBudget, and FlyBudget never sees your bank
+  password. Read Enable Banking's privacy policy at [enablebanking.com](https://enablebanking.com).
+- Your Enable Banking private key and bank sessions are encrypted on your computer or server, never
+  shown to the app's page, and left out of backups.
 
 Everything else (the fonts, the icons, the charts) is part of the app. FlyBudget loads nothing
 from other websites.
@@ -45,6 +52,9 @@ from other websites.
   **Settings → Server** checks your setup.
 - **Everywhere**: the app refuses to load code from other websites, bank data is checked before
   it's saved, and exports are protected against spreadsheet formula tricks.
+- **Account numbers are masked.** FlyBudget keeps a bank account's IBAN only as a fingerprint (a
+  one-way hash, used to recognize transfers between your accounts) and a masked form like
+  `ES12 •••• 3456` for display. The full number isn't stored.
 
 ## What you can do
 
