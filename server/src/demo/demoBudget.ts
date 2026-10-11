@@ -495,6 +495,8 @@ export function buildDemoBudget(today: Date): DemoBudget {
     /** Paid, but not yet linked to its occurrence: the Recurring page suggests the match */
     unlinked?: (date: string) => boolean;
     notes?: string;
+    /** "Bank text contains": recognizes its transactions by the bank's text (D28) */
+    matchText?: string;
   }
 
   const start = ymd(firstMonth);
@@ -520,6 +522,7 @@ export function buildDemoBudget(today: Date): DemoBudget {
       account: 'checking',
       amount: 153_110,
       amountType: 'approximate',
+      matchText: 'Brightwave',
       type: 'biweekly',
       start: ymd(firstFriday),
       paid: (date) => (date < raiseDate ? 148_652 : 153_110),
@@ -689,6 +692,7 @@ export function buildDemoBudget(today: Date): DemoBudget {
           : null,
       payeeId: spec.payee ? `demo-payee-${spec.payee}` : null,
       notes: spec.notes ?? null,
+      matchText: spec.matchText ?? null,
       status: spec.status ?? 'active',
       source: 'manual',
       // Canceled schedules get no occurrences; mark this one done so the server's startup
