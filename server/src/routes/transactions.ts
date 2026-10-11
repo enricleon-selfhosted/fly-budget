@@ -8,11 +8,19 @@ import {
   deleteTransactionRow,
   resolvePayee,
   unlinkTransfer,
+  type TransferRefusal,
 } from '../services/transactionHelpers.js';
 import { buildRuleContext, insertNewTransaction, loadRules } from '../services/ruleService.js';
 import { isoDate } from '../utils/validation.js';
 
 export const transactionsRouter = Router();
+
+/** The status a refused transfer write answers with */
+function transferStatus(reason: TransferRefusal): 400 | 403 | 404 {
+  if (reason === 'not_found') return 404;
+  if (reason === 'reconciled') return 403;
+  return 400;
+}
 
 const id = z.string().min(1).max(64);
 // Amounts are integer cents; the cap keeps sums far inside Number.MAX_SAFE_INTEGER
@@ -455,7 +463,7 @@ transactionsRouter.put('/:id', (req, res) => {
 // recognized a transfer that wasn't one)
 transactionsRouter.post('/:id/unlink-transfer', (req, res) => {
   const outcome = unlinkTransfer(req.params.id);
-  if (!outcome.ok) return res.status(outcome.status).json({ error: outcome.error });
+  if (!outcome.ok) return res.status(transferStatus(outcome.reason)).json({ error: outcome.error });
   res.json(db.select().from(transactions).where(eq(transactions.id, req.params.id)).get());
 });
 
