@@ -4,6 +4,7 @@ import { db } from '../../db/index.js';
 import { accounts, transactions } from '../../db/schema.js';
 import { buildRuleContext, insertNewTransaction, loadRules } from '../ruleService.js';
 import { linkTransfer } from '../transactionHelpers.js';
+import { afterTransactionsWritten } from '../transactionFx.js';
 import { autoMatchImported } from '../matchingEngine.js';
 import type { ExchangeCandidate, ManualCandidate, TransferCandidate } from './matching.js';
 
@@ -88,10 +89,22 @@ const plain = and(
 /** The store backed by the app's SQLite database. Rules load once per store. */
 export function createSqliteImportStore(): ImportStore {
   let ruleOpts: Parameters<typeof insertNewTransaction>[1] | undefined;
+  /** What the running transaction() inserted: converted once, at its end */
+  let written: string[] | null = null;
 
   return {
     transaction(fn) {
-      return db.transaction(() => fn());
+      return db.transaction(() => {
+        written = [];
+        try {
+          const result = fn();
+          // One conversion (and rate check) for the whole batch, like CSV import (M3)
+          afterTransactionsWritten(written);
+          return result;
+        } finally {
+          written = null;
+        }
+      });
     },
 
     hasImported(accountId, importedId) {
@@ -140,8 +153,9 @@ export function createSqliteImportStore(): ImportStore {
       ruleOpts ??= { rules: loadRules(), ctx: buildRuleContext() };
       const { transaction } = insertNewTransaction(
         { ...input, payeeId: null, categoryId: null },
-        ruleOpts,
+        { ...ruleOpts, deferFx: written !== null },
       );
+      written?.push(transaction.id);
       return transaction.id;
     },
 

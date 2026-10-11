@@ -2,6 +2,7 @@ import { db } from '../db/index.js';
 import { plaidItems, plaidAccountMappings, transactions, accounts } from '../db/schema.js';
 import { logError } from '../utils/log.js';
 import { eq, and, inArray } from 'drizzle-orm';
+import { convertTransactions } from './fx/fxService.js';
 import { syncTransactions, plaidAmountToCents, plaidBalanceToCents } from './plaidService.js';
 import { buildRuleContext, insertNewTransaction, loadRules } from './ruleService.js';
 import { accountTransactionSum } from './balances.js';
@@ -111,6 +112,8 @@ export async function syncPlaidItem(plaidItemId: string): Promise<SyncResult> {
         })
         .where(eq(transactions.id, existing.id))
         .run();
+      // A new date or amount needs converting again in an account in another currency (M3)
+      convertTransactions([existing.id]);
 
       result.modified++;
     }

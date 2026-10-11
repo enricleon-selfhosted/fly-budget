@@ -1,6 +1,6 @@
 import { addDays, format, parseISO, subDays } from 'date-fns';
 import { defaultOffBudget, type AccountType } from '../../utils/accountTypes.js';
-import { accountCurrency, offBudgetFor, storedCurrency } from '../../utils/currency.js';
+import { accountCurrency, startsOffBudget, storedCurrency } from '../../utils/currency.js';
 import { cleanText } from '../../utils/text.js';
 import { suggestAccountType } from './mapping.js';
 
@@ -92,13 +92,17 @@ export function planMapping(
   if (request.action === 'create') {
     const currency = storedCurrency(bank.currency, context.budgetCurrency);
     const type = request.accountType ?? suggestAccountType(bank.cashAccountType);
-    const requested = (request.isOffBudget ?? defaultOffBudget(type)) as 0 | 1;
+
     return {
       action: 'create',
       account: {
         name: cleanText(request.accountName, 200) || bank.name,
         type,
-        isOffBudget: offBudgetFor(currency, requested),
+        isOffBudget: startsOffBudget(
+          currency,
+          request.isOffBudget as 0 | 1 | undefined,
+          defaultOffBudget(type),
+        ),
         currency,
       },
       syncFrom: request.syncFrom ?? defaultSyncFrom(context.today),

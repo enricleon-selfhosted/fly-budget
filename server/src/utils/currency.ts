@@ -1,9 +1,9 @@
 import { z } from 'zod';
 
-// A budget has one currency (like YNAB). Accounts in another currency keep it in
-// `accounts.currency`; null means the budget's currency, so the server can tell them apart
-// without knowing which currency the budget uses. Without exchange rates their money can't
-// be budgeted or added to the rest, so they stay off budget and out of net worth totals.
+// A budget has one currency (like YNAB), stored in `budget_settings`. Accounts in another
+// currency keep it in `accounts.currency`; null means the budget's, so a change of budget
+// currency only re-labels accounts (docs/multi-currency M2). Their transactions are converted to
+// the budget's currency at a rate (services/fx/), and they can be on or off budget (M1).
 
 export const currencyCode = z
   .string()
@@ -19,7 +19,15 @@ export function accountCurrency(stored: string | null, budgetCurrency: string): 
   return stored ?? budgetCurrency;
 }
 
-/** Accounts in another currency are always off budget (1); others keep what was asked */
-export function offBudgetFor(stored: string | null, requested: 0 | 1): 0 | 1 {
-  return stored ? 1 : requested;
+/**
+ * Whether a new account starts off budget: what was asked; otherwise off for an account in
+ * another currency, so it doesn't change the budget until the user says so (M1), and by its type
+ * for the rest.
+ */
+export function startsOffBudget(
+  stored: string | null,
+  requested: 0 | 1 | undefined,
+  byType: 0 | 1,
+): 0 | 1 {
+  return requested ?? (stored ? 1 : byType);
 }

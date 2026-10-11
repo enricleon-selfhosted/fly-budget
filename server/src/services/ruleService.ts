@@ -15,6 +15,8 @@ import {
   type TxState,
 } from './rulesEngine.js';
 import { resolvePayee } from './transactionHelpers.js';
+import { convertTransactions } from './fx/fxService.js';
+import { afterTransactionsWritten } from './transactionFx.js';
 
 type RuleRow = typeof rules.$inferSelect;
 type TxRow = typeof transactions.$inferSelect;
@@ -73,13 +75,18 @@ export type NewTransactionInput = {
   isAdjustment?: boolean;
 };
 
-type InsertOptions = {
+export type InsertOptions = {
   /** Pass these when inserting many transactions (bank sync, CSV) so they load once */
   rules?: EngineRule[];
   ctx?: RuleContext;
   /** Keep a category/notes the user entered themselves instead of letting rules replace them */
   keepUserCategory?: boolean;
   keepUserNotes?: boolean;
+  /**
+   * Leave converting to the budget's currency to the caller, which passes every id it inserted to
+   * afterTransactionsWritten once (CSV import), instead of once per row
+   */
+  deferFx?: boolean;
 };
 
 /**
@@ -88,7 +95,13 @@ type InsertOptions = {
  * category, the payee's default category applies. A split action creates a parent plus children.
  */
 export function insertNewTransaction(input: NewTransactionInput, opts: InsertOptions = {}) {
-  if (input.isAdjustment) return insertAdjustment(input);
+  const result = input.isAdjustment ? insertAdjustment(input) : insertWithRules(input, opts);
+  // In an account in another currency: its rate to the budget's (docs/multi-currency M3)
+  if (!opts.deferFx) afterTransactionsWritten([result.transaction.id]);
+  return result;
+}
+
+function insertWithRules(input: NewTransactionInput, opts: InsertOptions) {
   let payeeId = input.payeeId;
   if (!payeeId && input.payeeName) {
     payeeId =
@@ -339,6 +352,8 @@ export function applyRules(opts: PlanOptions & { transactionIds: string[] }): nu
       }
     }
   });
+  // Parts of a split in another currency share its rate
+  convertTransactions(plan.filter((p) => p.changes.split).map((p) => p.transactionId));
   return plan.length;
 }
 

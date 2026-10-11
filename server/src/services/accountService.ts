@@ -3,12 +3,17 @@ import { nanoid } from 'nanoid';
 import { db } from '../db/index.js';
 import { accounts } from '../db/schema.js';
 import { defaultOffBudget, type AccountType } from '../utils/accountTypes.js';
-import { offBudgetFor } from '../utils/currency.js';
+import { startsOffBudget, storedCurrency } from '../utils/currency.js';
 import { accountTransactionSum } from './balances.js';
+import { scheduleRatesDownload } from './fx/download.js';
+import { refreshFx } from './fx/fxService.js';
+import { budgetCurrency } from './fx/settings.js';
+import { uncategorizeTransfersThatStopCrossing } from './transactionHelpers.js';
 
-// Creating accounts, and one account's balance. The accounts API and bank connections both
-// come here, so the rules have one owner: accounts start on or off budget by their type, and an
-// account in another currency is always off budget (utils/currency.ts).
+// Creating and changing accounts, and one account's balance. The accounts API and bank
+// connections both come here, so the rules have one owner: a null currency means the budget's
+// (docs/multi-currency M2), new accounts in another currency start off budget (M1), and a change
+// of currency or budget status keeps their transactions right (M3, M8).
 
 export type Account = typeof accounts.$inferSelect;
 
@@ -16,12 +21,21 @@ export type NewAccount = {
   name: string;
   type: AccountType;
   startingBalance?: number;
-  /** Unset: by its type. An account in another currency is off budget either way */
+  /** Unset: by its type, and off budget in another currency */
   isOffBudget?: 0 | 1;
-  /** Only for an account in another currency than the budget's (null = the budget's) */
   currency?: string | null;
   logo?: string | null;
 };
+
+export type AccountChanges = Partial<
+  Pick<Account, 'name' | 'type' | 'startingBalance' | 'isOffBudget' | 'currency' | 'logo'>
+>;
+
+/** The currency to store: null for the budget's own; as given while the budget has none yet */
+function toStored(currency: string | null): string | null {
+  const budget = budgetCurrency();
+  return budget ? storedCurrency(currency, budget) : currency;
+}
 
 function findAccount(id: string): Account | null {
   return db.select().from(accounts).where(eq(accounts.id, id)).get() ?? null;
@@ -32,14 +46,13 @@ function findAccount(id: string): Account | null {
  * connection creates the account and links it in one).
  */
 export function createAccount(input: NewAccount): Account {
-  const currency = input.currency ?? null;
+  const currency = toStored(input.currency ?? null);
   const account: Account = {
     id: nanoid(),
     name: input.name,
     type: input.type,
     startingBalance: input.startingBalance ?? 0,
-    // Homes, cars, investments and loans start off budget unless asked otherwise
-    isOffBudget: offBudgetFor(currency, input.isOffBudget ?? defaultOffBudget(input.type)),
+    isOffBudget: startsOffBudget(currency, input.isOffBudget, defaultOffBudget(input.type)),
     sortOrder: 0,
     closedAt: null,
     logo: input.logo ?? null,
@@ -47,7 +60,36 @@ export function createAccount(input: NewAccount): Account {
     createdAt: new Date().toISOString(),
   };
   db.insert(accounts).values(account).run();
+  // Its transactions need rates
+  if (currency) scheduleRatesDownload();
   return account;
+}
+
+/**
+ * Changes an account. Moving it on or off budget uncategorizes the transfers that stop crossing
+ * the budget's boundary (M8); a new currency re-converts its transactions (M3), all in one
+ * database transaction. Null when the account doesn't exist.
+ */
+export function updateAccount(
+  id: string,
+  changes: AccountChanges,
+): { account: Account; transfersUncategorized: number } | null {
+  const before = findAccount(id);
+  if (!before) return null;
+  const values = { ...changes };
+  if (values.currency !== undefined) values.currency = toStored(values.currency);
+
+  const result = db.transaction((tx) => {
+    if (Object.keys(values).length)
+      tx.update(accounts).set(values).where(eq(accounts.id, id)).run();
+    const account = findAccount(id)!;
+    const transfersUncategorized =
+      account.isOffBudget !== before.isOffBudget ? uncategorizeTransfersThatStopCrossing(id) : 0;
+    if (account.currency !== before.currency) refreshFx({ accountIds: [id] });
+    return { account, transfersUncategorized };
+  });
+  if (result.account.currency !== before.currency) scheduleRatesDownload();
+  return result;
 }
 
 /** Starting balance plus its transactions (split parts counted once); null if it doesn't exist */
