@@ -18,12 +18,13 @@ import {
   scheduleOccurrences,
   schedules,
   simplefinAccountMappings,
+  enableBankingAccounts,
   transactions,
 } from '../db/schema.js';
 
 // Full JSON backup of the user's data, and restoring one.
 //
-// Bank credentials (Plaid/SimpleFIN), the server password and login sessions are
+// Bank credentials (Plaid, SimpleFIN, Enable Banking), the server password and login sessions are
 // never included: a backup file is easy to leave lying around, and credentials are
 // encrypted with a key that only this installation has anyway. After a restore,
 // connected banks keep syncing into the same accounts when the backup came from
@@ -145,6 +146,11 @@ export function restoreBackup(data: Record<BackupTable, Row[]>) {
     .from(simplefinAccountMappings)
     .where(isNotNull(simplefinAccountMappings.accountId))
     .all();
+  const enableBankingLinks = db
+    .select({ id: enableBankingAccounts.id, accountId: enableBankingAccounts.accountId })
+    .from(enableBankingAccounts)
+    .where(isNotNull(enableBankingAccounts.accountId))
+    .all();
   const restoredAccounts = new Set(data.accounts.map((a) => a.id as string));
 
   db.transaction((tx) => {
@@ -163,6 +169,7 @@ export function restoreBackup(data: Record<BackupTable, Row[]>) {
     for (const [table, links] of [
       [plaidAccountMappings, plaidLinks],
       [simplefinAccountMappings, simplefinLinks],
+      [enableBankingAccounts, enableBankingLinks],
     ] as const) {
       for (const link of links) {
         if (!link.accountId || !restoredAccounts.has(link.accountId)) continue;
