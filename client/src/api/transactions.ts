@@ -65,6 +65,10 @@ export const updateTransaction = (id: string, data: Partial<CreateTransactionDat
 export const deleteTransaction = (id: string) =>
   apiFetch<void>(`/transactions/${id}`, { method: 'DELETE' });
 
+/** Turns a transfer back into two ordinary transactions */
+export const unlinkTransfer = (id: string) =>
+  apiFetch<Transaction>(`/transactions/${id}/unlink-transfer`, { method: 'POST' });
+
 export const reconcileAccount = (accountId: string, transactionIds: string[]) =>
   apiFetch<{ reconciled: number }>(`/accounts/${accountId}/reconcile`, {
     method: 'PUT',

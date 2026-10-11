@@ -28,6 +28,7 @@ export function useCreateAccount() {
             type: created.type,
             startingBalance: created.startingBalance,
             isOffBudget: created.isOffBudget,
+            currency: created.currency,
           });
           qc.invalidateQueries({ queryKey: ['accounts'] });
         },
@@ -61,6 +62,7 @@ export function useUpdateAccount() {
             name: snapshot.name,
             type: snapshot.type,
             isOffBudget: snapshot.isOffBudget,
+            currency: snapshot.currency ?? null,
           });
           qc.invalidateQueries({ queryKey: ['accounts'] });
         },
