@@ -127,6 +127,44 @@ test("bank connections can't be set up in the demo", async ({ page }) => {
   expect(status).toBe(403);
 });
 
+test('exchange rates can be typed in, but not downloaded, in the demo', async ({ page }) => {
+  // The sample budget has no account in another currency: add one
+  await openDemo(page, '/accounts');
+  await page.getByRole('main').getByRole('button', { name: 'Add Account' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Add Account' });
+  await dialog.getByRole('textbox', { name: 'Account name' }).fill('Euro card');
+  await dialog.getByRole('combobox', { name: 'Currency' }).selectOption('EUR');
+  await dialog.getByRole('button', { name: 'Add Account' }).click();
+  await expect(dialog).toBeHidden();
+
+  // Same tab (a reload would start a new demo)
+  await page.evaluate(() => (location.hash = '#/settings?tab=currencies'));
+  await expect(
+    page.getByRole('checkbox', { name: 'Download daily exchange rates' }),
+  ).toBeDisabled();
+  await page.getByRole('button', { name: 'Rates' }).click();
+  await page.getByLabel('1 EUR in USD').fill('1.10');
+  await page.getByRole('button', { name: 'Add rate' }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        async () => ((await (await fetch('/api/currencies/EUR/rates')).json()) as unknown[]).length,
+      ),
+    )
+    .toBe(1);
+  const status = await page.evaluate(
+    async () =>
+      (
+        await fetch('/api/currencies', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ downloadRates: true }),
+        })
+      ).status,
+  );
+  expect(status).toBe(403);
+});
+
 test('the payment waiting to be matched can be confirmed', async ({ page }) => {
   await openDemo(page, '/recurring');
   await page.getByRole('button', { name: 'Review now' }).click();
