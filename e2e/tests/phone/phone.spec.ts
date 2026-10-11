@@ -91,6 +91,7 @@ test('every page fits a phone screen', async ({ page, api }, testInfo) => {
     ['payees', '/payees'],
     ['rules', '/rules'],
     ['settings', '/settings'],
+    ['settings-enable-banking', '/settings?tab=connections&provider=enablebanking'],
   ];
 
   const problems: string[] = [];
