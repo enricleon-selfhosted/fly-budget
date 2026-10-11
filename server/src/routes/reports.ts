@@ -6,7 +6,7 @@ import type { Request, Response } from 'express';
 import { monthBounds } from '../utils/date.js';
 import { isLiabilityType } from '../utils/accountTypes.js';
 import { isMonth, isRealDate } from '../utils/validation.js';
-import { inAccountBalance, isIncomeOrSpending } from '../services/balances.js';
+import { inAccountBalance, inBudgetCurrency, isIncomeOrSpending } from '../services/balances.js';
 
 export const reportsRouter = Router();
 
@@ -111,7 +111,8 @@ reportsRouter.get('/net-worth', (req, res) => {
 
   const periods = isDaily ? dayRange(from, to) : monthRange(from, to);
 
-  const allAccounts = db.select().from(accounts).all();
+  // Accounts in another currency can't be added up with the rest
+  const allAccounts = db.select().from(accounts).where(isNull(accounts.currency)).all();
 
   const upperBound = isDaily ? to : monthBounds(to).to;
   const groupExpr = isDaily
@@ -168,6 +169,7 @@ reportsRouter.get('/spending-by-category', (req, res) => {
     eq(transactions.isParent, 0),
     isNull(transactions.transferTransactionId),
     isIncomeOrSpending,
+    inBudgetCurrency,
     sql`coalesce(${categoryGroups.isIncome}, 0) = 0`,
   ];
   if (from) conditions.push(gte(transactions.date, monthBounds(from).from));
@@ -221,6 +223,7 @@ reportsRouter.get('/income-vs-expenses', (req, res) => {
         eq(transactions.isParent, 0),
         isNull(transactions.transferTransactionId),
         isIncomeOrSpending,
+        inBudgetCurrency,
       ),
     )
     .groupBy(sql`strftime('%Y-%m', ${transactions.date})`, isIncome)
@@ -319,7 +322,7 @@ reportsRouter.get('/income-by-category', (req, res) => {
   const range = optionalMonthParams(req, res);
   if (!range) return;
   const { from, to } = range;
-  const conditions = [eq(categoryGroups.isIncome, 1)];
+  const conditions = [eq(categoryGroups.isIncome, 1), inBudgetCurrency];
   if (from) conditions.push(gte(transactions.date, monthBounds(from).from));
   if (to) conditions.push(lte(transactions.date, monthBounds(to).to));
 
@@ -350,7 +353,7 @@ reportsRouter.get('/spending-trends', (req, res) => {
   if (typeof category_ids !== 'string' || !category_ids) return res.json([]);
 
   const ids = category_ids.split(',');
-  const conditions = [];
+  const conditions = [inBudgetCurrency];
   if (from) conditions.push(gte(transactions.date, monthBounds(from).from));
   if (to) conditions.push(lte(transactions.date, monthBounds(to).to));
   // Daily totals (for short ranges) put the date (yyyy-MM-dd) in `month`
@@ -656,6 +659,7 @@ reportsRouter.get('/custom', (req, res) => {
     eq(transactions.isParent, 0),
     isNull(transactions.transferTransactionId),
     isIncomeOrSpending,
+    inBudgetCurrency,
   ];
 
   if (balance_type === 'expense') conditions.push(lt(transactions.amount, 0));

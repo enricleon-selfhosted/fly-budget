@@ -12,6 +12,7 @@ import {
   apiNotFound,
   apiTokenGuard,
   bankRateLimit,
+  consentCallbackRateLimit,
   errorHandler,
   hostGuard,
   originGuard,
@@ -33,6 +34,12 @@ import { schedulesRouter } from './routes/schedules.js';
 import { goalsRouter } from './routes/goals.js';
 import { plaidRouter } from './routes/plaid.js';
 import { simplefinRouter } from './routes/simplefin.js';
+import {
+  ENABLE_BANKING_CALLBACK_PATH,
+  createEnableBankingCallback,
+  createEnableBankingRouter,
+} from './routes/enableBanking.js';
+import { createEnableBankingService } from './services/enableBanking/service.js';
 import { serverRouter } from './routes/server.js';
 import { syncAllItems } from './services/plaidSyncService.js';
 import { encryptStoredCredentials } from './services/credentialEncryption.js';
@@ -48,6 +55,7 @@ import {
 import { format, addDays } from 'date-fns';
 
 const app = express();
+const enableBanking = createEnableBankingService();
 
 // Behind a reverse proxy (server mode), trust it for HTTPS and client-IP detection
 if (trustProxy) {
@@ -62,6 +70,16 @@ if (trustProxy) {
 app.disable('x-powered-by');
 app.use(proxyConfigWarning);
 app.use(hostGuard);
+// The browser coming back from the bank can't pass the guards below (it's a cross-site
+// navigation without the app's cookies), so this one route is authenticated by its
+// single-use consent state instead (docs/enable-banking/decisions.md D2)
+app.get(
+  ENABLE_BANKING_CALLBACK_PATH,
+  consentCallbackRateLimit,
+  securityHeaders,
+  hstsWhenSecure,
+  createEnableBankingCallback(enableBanking),
+);
 app.use(originGuard);
 app.use(apiTokenGuard(process.env.FLYBUDGET_API_TOKEN));
 app.use(securityHeaders, hstsWhenSecure);
@@ -95,6 +113,7 @@ app.use('/api/schedules', schedulesRouter);
 app.use('/api/goals', goalsRouter);
 app.use('/api/plaid', bankRateLimit, plaidRouter);
 app.use('/api/simplefin', bankRateLimit, simplefinRouter);
+app.use('/api/enablebanking', bankRateLimit, createEnableBankingRouter(enableBanking));
 app.use('/api', apiNotFound);
 
 export async function startServer(port: number | string): Promise<void> {
@@ -203,6 +222,14 @@ function runStartupTasks() {
         if (total > 0) console.log(`SimpleFIN sync: imported ${total} new transaction(s)`);
       })
       .catch((err) => console.error('SimpleFIN sync error:', err.message)),
+    // Background: skips connections synced in the last 6 hours (PSD2 allows 4 unattended reads a day)
+    enableBanking
+      .syncAll({ background: true })
+      .then((results) => {
+        const total = results.reduce((s, r) => s + r.added, 0);
+        if (total > 0) console.log(`Enable Banking sync: imported ${total} new transaction(s)`);
+      })
+      .catch((err) => console.error('Enable Banking sync error:', err.message)),
   ]);
 
   bankSyncDone.then(() =>
