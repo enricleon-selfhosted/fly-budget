@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
 import { CURRENCY_CODES } from './budgetCurrency';
+import { rateText } from './currencyRates';
 import {
   budgetSideHint,
   budgetSideTakesCategory,
@@ -87,19 +88,14 @@ describe('exchangeRate (property-based)', () => {
     );
   });
 
-  it('is |to| / |from| rounded to four decimals, or null when that rounds to zero', () => {
+  it('is |to| / |from|, however small', () => {
     fc.assert(
       fc.property(arbCents, arbCents, (from, to) => {
-        const rate = exchangeRate(from, to);
-        const exact = to / from;
-        if (rate === null) {
-          expect(exact).toBeLessThan(0.00005);
-          return;
-        }
-        expect(Math.abs(rate - exact)).toBeLessThanOrEqual(0.00005 + Math.abs(exact) * 1e-12);
-        expect(Number(rate.toFixed(4))).toBe(rate);
+        expect(exchangeRate(from, to)).toBe(to / from);
       }),
     );
+    // IDR 1,000,000.00 → EUR 58.00
+    expect(exchangeRate(100_000_000, 5_800)).toBeCloseTo(0.000058, 12);
   });
 
   it('ignores the signs of the amounts (the account side is negative for money out)', () => {
@@ -140,9 +136,7 @@ describe('exchangeLabel (property-based)', () => {
         if (rate === null) {
           expect(label).not.toContain('·');
         } else {
-          const match = label.match(new RegExp(`· 1 ${from} = ([\\d,]+\\.\\d{4}) ${to}$`));
-          expect(match).not.toBeNull();
-          expect(Number(match![1].replace(/,/g, ''))).toBe(rate);
+          expect(label.endsWith(` · ${rateText(from, to, rate)}`)).toBe(true);
         }
       }),
     );
@@ -151,6 +145,14 @@ describe('exchangeLabel (property-based)', () => {
   it('shows the example from the design notes', () => {
     const label = exchangeLabel({ cents: 50_000, code: 'GBP' }, { cents: 58_025, code: 'EUR' });
     expect(label.replace(/ /g, ' ')).toBe('GBP 500.00 → EUR 580.25 · 1 GBP = 1.1605 EUR');
+  });
+
+  it('shows the rate of an exchange into a much smaller unit (IDR to EUR)', () => {
+    const label = exchangeLabel(
+      { cents: 100_000_000, code: 'IDR' },
+      { cents: 5_800, code: 'EUR' },
+    ).replace(/ /g, ' ');
+    expect(label).toContain('· 1 IDR = 0.000058 EUR');
   });
 
   it('shows the amounts without a rate when one of them is zero', () => {
