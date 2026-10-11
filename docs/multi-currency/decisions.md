@@ -53,7 +53,9 @@ Rates live in `exchange_rates`, one row per currency pair and date, with a deter
   no key; about 30 currencies). FlyBudget is local-first and doesn't call third parties unasked, so
   downloading is off until the user turns it on (`budget_settings.download_rates`). The request
   carries only the currency codes and dates, never amounts or account details. It runs at startup,
-  after an account's currency or budget status changes, after a bank sync, and on demand; each run
+  after an account's currency or budget status changes, after a bank sync, after any other write
+  that leaves a new transaction without a rate (adding, splitting, transfers, CSV import, paying
+  or auto-creating a recurring item), and on demand; each run
   fills what's missing from the earliest transaction in each foreign currency to today.
 - **The user**, for a date: it applies until the next rate. A rate typed in wins over a
   downloaded one for the same date, and downloads never overwrite it.

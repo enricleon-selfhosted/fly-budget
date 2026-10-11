@@ -14,9 +14,14 @@ routes/enableBanking.ts            thin: Zod-validate, call a service, shape the
 ──────────────────────────────────────────────────────────────────────────────────────
 services/enableBanking/            provider adapter
   connectService.ts                start / complete / cancel a consent, disconnect
-  accountMapping.ts                create / link / ignore bank accounts (currency rules, D11)
+  rules.ts                         pure: planMapping, defaultSyncFrom / syncFromAfter,
+                                   syncWindowStart, shouldSkipBackgroundSync, consentEnded,
+                                   localDay (no database, no clock)
+  accountMapping.ts                applies a mapping plan: create / link / ignore bank accounts
+                                   (currency rules, D11, multi-currency M1/M2)
   syncService.ts                   sync one connection / all (status, windows, balances)
-  consent.ts                       pending consents keyed by state (in memory, single use)
+  consent.ts                       pending consents keyed by state (in memory, single use;
+                                   fail/complete check the attempt's id)
   dataSource.ts                    BankDataSource implementation over the API client
   client.ts                        one function per Enable Banking endpoint (fetch injected)
   jwt.ts                           RS256 application JWT (crypto injected clock)
@@ -27,12 +32,15 @@ services/enableBanking/            provider adapter
 ──────────────────────────────────────────────────────────────────────────────────────
 services/bankSync/                 provider-agnostic core (D3)
   types.ts                         RemoteTransaction, RemoteBalance, BankDataSource
-  matching.ts                      pure: manual-match and transfer-counterpart decisions
+  matching.ts                      pure: manual-match, transfer-counterpart (same currency only)
+                                   and exchange decisions
   importStore.ts                   ImportStore interface + SQLite implementation
   importTransactions.ts            dedup → match → insert (rules) → transfer, per account
 ──────────────────────────────────────────────────────────────────────────────────────
 services/ruleService.ts            insertNewTransaction (rules, payees) — unchanged
 services/transactionHelpers.ts     linkTransfer / unlinkTransfer (new, shared)
+services/accountService.ts         createAccount, setBalanceTo, accountSummary (shared with the
+                                   accounts API)
 utils/money.ts                     exact decimal string → hundredths (D12), shared
 ```
 
@@ -76,13 +84,16 @@ function importTransactions(target, remote: RemoteTransaction[], ctx): ImportRes
 
 `ImportStore` is the only thing the import core uses to read or write the database (look up an
 imported id, find manual-match and transfer candidates, attach an import to a row, insert through
-`insertNewTransaction`, link a transfer). The decisions themselves (`pickManualMatch`,
-`pickTransferCounterpart`) are pure functions in `matching.ts`.
+`insertNewTransaction`, link a transfer, read an account's stored currency). Transfer candidates
+come back in any currency with their own; the decisions themselves (`pickManualMatch`,
+`pickTransferCounterpart`, which pairs only the same currency, `pickExchangeCounterpart`,
+`exchangeSiblings`) are pure functions in `matching.ts`.
 
 ## Data model (migration `0021_enable_banking`, hand-written like `0019`/`0020`)
 
 ```
-accounts.currency            text, nullable — ISO 4217 when it differs from the budget's (D11)
+accounts.currency            text, nullable — ISO 4217 when it differs from the budget's (D11,
+                             the budget's stored on the server since multi-currency M2)
 
 enable_banking_config        one row, id = 'default'
   application_id             text            Enable Banking application id (kid)
