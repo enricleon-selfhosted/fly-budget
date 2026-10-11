@@ -17,6 +17,7 @@ import { useTransactions } from '../hooks/useTransactions';
 import { useAppStore } from '../store/appStore';
 import { usePreferencesStore } from '../store/preferencesStore';
 import { formatCurrency } from '../utils/currency';
+import { valueInBudget } from '../utils/fxDisplay';
 import { chartColors } from '../utils/chartColors';
 import { TransactionTable } from '../components/transactions/TransactionTable';
 import type { Transaction } from '../types';
@@ -171,12 +172,19 @@ function BudgetWidget({
   );
 }
 
-/** What a transaction put in this category: for a split, only its parts in it */
-function amountInCategory(t: Transaction, categoryId: string): number {
-  if (!t.children?.length) return t.amount;
-  return t.children
-    .filter((c) => c.categoryId === categoryId)
-    .reduce((sum, c) => sum + c.amount, 0);
+/**
+ * What a transaction put in this category, in the budget's currency: for a split, only its parts
+ * in it. Null while it waits for a rate (an account in another currency).
+ */
+function valueInCategory(t: Transaction, categoryId: string): number | null {
+  if (!t.children?.length) return valueInBudget(t);
+  let sum = 0;
+  for (const part of t.children.filter((c) => c.categoryId === categoryId)) {
+    const value = valueInBudget(part);
+    if (value === null) return null;
+    sum += value;
+  }
+  return sum;
 }
 
 function SummaryWidget({
@@ -191,10 +199,13 @@ function SummaryWidget({
   const stats = useMemo(() => {
     if (transactions.length === 0) return null;
 
-    const amounts = transactions.map((t) => Math.abs(amountInCategory(t, categoryId)));
+    const amounts = transactions.flatMap((t) => {
+      const value = valueInCategory(t, categoryId);
+      return value === null ? [] : [Math.abs(value)];
+    });
     const total = amounts.reduce((s, a) => s + a, 0);
-    const largest = Math.max(...amounts);
-    const average = Math.round(total / amounts.length);
+    const largest = amounts.length ? Math.max(...amounts) : 0;
+    const average = amounts.length ? Math.round(total / amounts.length) : 0;
     const dates = transactions.map((t) => t.date).sort();
 
     return {

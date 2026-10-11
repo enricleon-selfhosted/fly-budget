@@ -10,7 +10,6 @@ import {
   bankCurrency,
   daysAgoIso,
   defaultCountry,
-  defaultOffBudget,
   describeSync,
   initialMappingRow,
   isHttpsUrl,
@@ -115,7 +114,7 @@ describe('initialMappingRow', () => {
     expect(row.offBudget).toBe(true);
   });
 
-  it('keeps an account in another currency off budget', () => {
+  it('starts an account in another currency off budget (M1)', () => {
     const row = initialMappingRow(bankAccount({ currency: 'USD' }), 'EUR', NOW);
     expect(row.offBudget).toBe(true);
     expect(bankCurrency(bankAccount({ currency: 'USD' }), 'EUR')).toBe('USD');
@@ -123,20 +122,11 @@ describe('initialMappingRow', () => {
   });
 });
 
-describe('defaultOffBudget', () => {
-  it('is on budget only for cash and credit types, unless the currency is foreign', () => {
-    expect(defaultOffBudget('savings', false)).toBe(false);
-    expect(defaultOffBudget('credit', false)).toBe(false);
-    expect(defaultOffBudget('mortgage', false)).toBe(true);
-    expect(defaultOffBudget('checking', true)).toBe(true);
-  });
-});
-
 describe('mappingAction', () => {
   it('sends a skip with no details', () => {
     const acc = bankAccount();
     const row = initialMappingRow(acc, 'EUR', NOW);
-    expect(mappingAction(acc, { ...row, action: 'skip' }, 'EUR')).toEqual({
+    expect(mappingAction(acc, { ...row, action: 'skip' })).toEqual({
       id: 'bank-1',
       action: 'skip',
     });
@@ -145,8 +135,8 @@ describe('mappingAction', () => {
   it('needs a name for a new account and trims it', () => {
     const acc = bankAccount();
     const row = initialMappingRow(acc, 'EUR', NOW);
-    expect(mappingAction(acc, { ...row, name: '   ' }, 'EUR')).toBeNull();
-    expect(mappingAction(acc, { ...row, name: '  Main  ' }, 'EUR')).toMatchObject({
+    expect(mappingAction(acc, { ...row, name: '   ' })).toBeNull();
+    expect(mappingAction(acc, { ...row, name: '  Main  ' })).toMatchObject({
       action: 'create',
       accountName: 'Main',
       isOffBudget: 0,
@@ -154,18 +144,33 @@ describe('mappingAction', () => {
     });
   });
 
-  it('sends 1 for off budget, and forces it for another currency', () => {
+  it('starts off budget for another currency, and can be put on budget', () => {
     const acc = bankAccount({ currency: 'USD' });
     const row = initialMappingRow(acc, 'EUR', NOW);
-    expect(mappingAction(acc, row, 'EUR')).toMatchObject({ isOffBudget: 1 });
+    expect(mappingAction(acc, row)).toMatchObject({ isOffBudget: 1 });
+    expect(mappingAction(acc, { ...row, offBudget: false })).toMatchObject({ isOffBudget: 0 });
+  });
+
+  it('sends the Off budget box as it is, for any account', () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom(null, 'EUR', 'USD', 'GBP'),
+        fc.boolean(),
+        (currency, offBudget) => {
+          const acc = bankAccount({ currency });
+          const row = { ...initialMappingRow(acc, 'EUR', NOW), offBudget };
+          expect(mappingAction(acc, row)).toMatchObject({ isOffBudget: offBudget ? 1 : 0 });
+        },
+      ),
+    );
   });
 
   it('needs an existing account to link to, and leaves the date to the server when empty', () => {
     const acc = bankAccount();
     const row = initialMappingRow(acc, 'EUR', NOW);
     const linking = withAction(row, acc, 'link', NOW);
-    expect(mappingAction(acc, linking, 'EUR')).toBeNull();
-    expect(mappingAction(acc, { ...linking, accountId: 'acc-9' }, 'EUR')).toEqual({
+    expect(mappingAction(acc, linking)).toBeNull();
+    expect(mappingAction(acc, { ...linking, accountId: 'acc-9' })).toEqual({
       id: 'bank-1',
       action: 'link',
       accountId: 'acc-9',

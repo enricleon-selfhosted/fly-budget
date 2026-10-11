@@ -8,6 +8,7 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { formatCurrency } from '../utils/currency';
 import { TransactionTable } from '../components/transactions/TransactionTable';
 import { AccountIcon } from '../components/accounts/AccountIcon';
+import { BudgetValue } from '../components/accounts/BudgetValue';
 import { EditAccountModal } from '../components/accounts/EditAccountModal';
 import { UpdateValueModal } from '../components/accounts/UpdateValueModal';
 import { accountTypeInfo } from '../utils/accountTypes';
@@ -53,6 +54,7 @@ export default function AccountTransactionsPage() {
             >
               {formatCurrency(account.balance, account.currency)}
             </span>
+            <BudgetValue account={account} className="text-sm tabular-nums" />
           </div>
           <div className="flex items-center gap-2">
             <Button variant="secondary" size="sm" onClick={() => setEditOpen(true)}>

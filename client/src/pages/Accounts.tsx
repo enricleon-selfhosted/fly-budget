@@ -21,7 +21,10 @@ import { formatCurrency } from '../utils/currency';
 import NetWorthMini from '../components/dashboard/NetWorthMini';
 import { ACCOUNT_GROUPS, type Account, type AccountGroup } from '../types';
 import { AccountIcon } from '../components/accounts/AccountIcon';
+import { BudgetValue } from '../components/accounts/BudgetValue';
 import { accountTypeInfo, accountTypeLabel } from '../utils/accountTypes';
+import { useCurrencies } from '../hooks/useCurrencies';
+import { changeInBudget, totalInBudget, valueInBudget } from '../utils/accountValues';
 
 function groupAccountsByType(accounts: Account[]) {
   const groups = new Map<AccountGroup, Account[]>();
@@ -41,20 +44,18 @@ interface AccountGroupProps {
   label: string;
   accounts: Account[];
   balancesAgo: Record<string, number>;
+  latestRate: (currency: string) => number | null;
 }
 
-function AccountGroup({ label, accounts, balancesAgo }: AccountGroupProps) {
+function AccountGroup({ label, accounts, balancesAgo, latestRate }: AccountGroupProps) {
   const [collapsed, setCollapsed] = useState(false);
   const navigate = useNavigate();
-  // Totals add up one currency: accounts in another currency are shown in theirs, not added here
-  const inBudgetCurrency = accounts.filter((a) => a.currency === null);
-  const groupTotal = inBudgetCurrency.reduce((sum, a) => sum + a.balance, 0);
-  const groupTotalAgo = inBudgetCurrency.reduce(
-    (sum, a) => sum + (balancesAgo[a.id] ?? a.balance),
-    0,
-  );
-  const change = groupTotal - groupTotalAgo;
-  const changePct = groupTotalAgo !== 0 ? (change / Math.abs(groupTotalAgo)) * 100 : 0;
+  // Totals are in the budget's currency: an account in another currency counts at its balance at
+  // the latest rate, and one without a rate is left out (utils/accountValues.ts)
+  const groupTotal = totalInBudget(accounts);
+  const hasValue = accounts.some((a) => valueInBudget(a) !== null);
+  const { change, base } = changeInBudget(accounts, balancesAgo, latestRate);
+  const changePct = base !== 0 ? (change / Math.abs(base)) * 100 : 0;
 
   return (
     <Card padding="none">
@@ -80,7 +81,7 @@ function AccountGroup({ label, accounts, balancesAgo }: AccountGroupProps) {
           )}
           <span className="text-xs text-text-tertiary">past month</span>
         </div>
-        {inBudgetCurrency.length > 0 && (
+        {hasValue && (
           <span
             className={`text-base font-semibold tabular-nums ${groupTotal < 0 ? 'text-negative' : 'text-text'}`}
           >
@@ -119,9 +120,12 @@ function AccountGroup({ label, accounts, balancesAgo }: AccountGroupProps) {
                   </div>
                 </div>
               </div>
-              <span className="text-sm font-medium tabular-nums text-text">
-                {formatCurrency(account.balance, account.currency)}
-              </span>
+              <div className="text-right">
+                <span className="block text-sm font-medium tabular-nums text-text">
+                  {formatCurrency(account.balance, account.currency)}
+                </span>
+                <BudgetValue account={account} className="block text-xs tabular-nums" />
+              </div>
             </div>
           ))}
         </div>
@@ -133,6 +137,10 @@ function AccountGroup({ label, accounts, balancesAgo }: AccountGroupProps) {
 export default function AccountsPage() {
   const { data: accounts = [], isLoading } = useAccounts();
   const { data: balancesAgo = {} } = useBalancesAgo();
+  const { data: currencyOverview } = useCurrencies();
+  // For an account in another currency that's empty now: its currency's latest rate
+  const latestRate = (code: string) =>
+    currencyOverview?.currencies.find((c) => c.code === code)?.latest?.rate ?? null;
   const [addOpen, setAddOpen] = useState(false);
   useOpenFromLink('add', () => setAddOpen(true));
   const allGroups = useMemo(() => groupAccountsByType(accounts), [accounts]);
@@ -200,6 +208,7 @@ export default function AccountsPage() {
                 label={g.label}
                 accounts={g.accounts}
                 balancesAgo={balancesAgo}
+                latestRate={latestRate}
               />
             ))}
           </div>

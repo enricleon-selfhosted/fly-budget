@@ -9,6 +9,7 @@ import { PayeeIcon } from '../payees/PayeeIcon';
 import { formatCurrency } from '../../utils/currency';
 import { usePreferencesStore } from '../../store/preferencesStore';
 import { AccountIcon } from '../accounts/AccountIcon';
+import { BudgetValueNote } from './BudgetValueNote';
 import type { Transaction, CategoryGroup, PayeeWithCount } from '../../types';
 
 interface Props {
@@ -249,13 +250,14 @@ export function TransactionRow({
           <div className="w-8 shrink-0" />
         )}
 
-        {/* Amount */}
+        {/* Amount, and in accounts in another currency its value in the budget's */}
         <div className="w-24 text-right shrink-0 mx-2">
           <span
-            className={`text-sm font-medium tabular-nums ${tx.amount > 0 ? 'text-positive' : 'text-text'}`}
+            className={`block text-sm font-medium tabular-nums ${tx.amount > 0 ? 'text-positive' : 'text-text'}`}
           >
             {formatCurrency(Math.abs(tx.amount), currency)}
           </span>
+          <BudgetValueNote tx={tx} className="block" />
         </div>
 
         {/* Detail panel arrow */}

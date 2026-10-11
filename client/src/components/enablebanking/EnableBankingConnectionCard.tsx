@@ -14,7 +14,7 @@ import {
   useDisconnectEnableBanking,
   useSyncEnableBankingConnection,
 } from '../../hooks/useEnableBanking';
-import { useBudgetCurrency } from '../../utils/budgetCurrency';
+import { useBudgetCurrency } from '../../hooks/useBudgetCurrency';
 import { formatCurrency } from '../../utils/currency';
 import type {
   EnableBankingAccount,

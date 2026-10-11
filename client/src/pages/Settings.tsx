@@ -1,11 +1,20 @@
 import { useSearchParams } from 'react-router-dom';
-import { Layers, ArrowUpDown, Download, SlidersHorizontal, Link2, Server } from 'lucide-react';
+import {
+  Layers,
+  ArrowUpDown,
+  Coins,
+  Download,
+  SlidersHorizontal,
+  Link2,
+  Server,
+} from 'lucide-react';
 import { ServerSettings } from '../components/settings/ServerSettings';
 import { CategoryManager } from '../components/settings/CategoryManager';
 import { AccountReorder } from '../components/settings/AccountReorder';
 import { DataExport } from '../components/settings/DataExport';
 import { PreferencesPanel } from '../components/settings/PreferencesPanel';
 import { ConnectedAccounts } from '../components/settings/ConnectedAccounts';
+import { CurrenciesPanel } from '../components/settings/CurrenciesPanel';
 import { LICENSE_URL, SOURCE_CODE_URL } from '../utils/project';
 
 const tabs = [
@@ -14,6 +23,8 @@ const tabs = [
   { id: 'connections', label: 'Connected Banks', icon: Link2 },
   { id: 'data', label: 'Data', icon: Download },
   { id: 'preferences', label: 'Preferences', icon: SlidersHorizontal },
+  // The budget's currency and the exchange rates of accounts in other currencies
+  { id: 'currencies', label: 'Currencies', icon: Coins },
   // Where the data lives; on a self-hosted server also security, devices and password
   { id: 'server', label: 'Server', icon: Server },
 ] as const;
@@ -63,6 +74,7 @@ export default function SettingsPage() {
           {activeTab === 'connections' && <ConnectedAccounts />}
           {activeTab === 'data' && <DataExport />}
           {activeTab === 'preferences' && <PreferencesPanel />}
+          {activeTab === 'currencies' && <CurrenciesPanel />}
           {activeTab === 'server' && <ServerSettings onOpenTab={setActiveTab} />}
 
           <p className="mt-10 pt-4 border-t border-border-light text-xs text-text-tertiary">

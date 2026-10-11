@@ -6,8 +6,17 @@ import {
   type SidebarMode,
 } from '../../store/preferencesStore';
 import { ConfirmModal } from '../ui/ConfirmModal';
+import { useModalValue } from '../ui/Modal';
+import {
+  BudgetCurrencyChangeModal,
+  type BudgetAccountsOnChange,
+} from './BudgetCurrencyChangeModal';
 import { IS_DEMO } from '../../demo/isDemo';
-import { CURRENCY_CODES, useBudgetCurrency } from '../../utils/budgetCurrency';
+import { CURRENCY_CODES } from '../../utils/budgetCurrency';
+import { useBudgetCurrency } from '../../hooks/useBudgetCurrency';
+import { useCanSave } from '../../hooks/useConnection';
+import { useCurrencies, useUpdateCurrencySettings } from '../../hooks/useCurrencies';
+import { SavingPausedHint } from '../connection/SavingPausedHint';
 
 const themeOptions: { value: Theme; label: string }[] = [
   { value: 'light', label: 'Light' },
@@ -45,19 +54,48 @@ export function PreferencesPanel() {
     setShowCategoryIcons,
     setShowAccountIcons,
   } = usePreferencesStore();
-  // The code as shown: the one the user chose, or the one guessed from the symbol
+  // The budget's currency: the server's, or this device's until the server has one
   const budget = useBudgetCurrency();
+  const { data: currencyOverview } = useCurrencies();
+  const canSave = useCanSave();
+  const saveCurrency = useUpdateCurrencySettings();
+  // A change waiting for the user to confirm it: accounts are re-labelled (M2)
+  const [pendingCurrency, setPendingCurrency] = useState<string | null>(null);
+  // Open or closed, from the server: a change re-labels them all
+  const budgetAccounts = currencyOverview?.accountsInBudgetCurrency ?? 0;
+  const confirming = useModalValue(pendingCurrency);
+  // While the server answers, the select keeps showing the choice instead of snapping back
+  const shownBudget = saveCurrency.isPending
+    ? (saveCurrency.variables?.currency ?? budget)
+    : budget;
   const budgetCodeOptions: readonly string[] = (CURRENCY_CODES as readonly string[]).includes(
-    budget,
+    shownBudget,
   )
     ? CURRENCY_CODES
-    : [...CURRENCY_CODES, budget];
+    : [...CURRENCY_CODES, shownBudget];
   const [resetOpen, setResetOpen] = useState(false);
+
+  // Sent to the server first; this device follows once it has accepted the change (M2)
+  function applyCurrency(code: string, budgetAccounts?: BudgetAccountsOnChange) {
+    saveCurrency.mutate(
+      { currency: code, budgetAccounts },
+      { onSuccess: () => setCurrencyCode(code) },
+    );
+  }
+
+  function chooseCurrency(code: string) {
+    // The select waits for the overview: without it there's no knowing which accounts change
+    if (code === budget || !currencyOverview) return;
+    // Accounts are re-labelled once the budget has a currency: say so, and ask about the
+    // accounts in the budget's currency, first
+    const accountsAffected = budgetAccounts > 0 || currencyOverview.currencies.length > 0;
+    if (currencyOverview.budgetCurrency && accountsAffected) setPendingCurrency(code);
+    else applyCurrency(code);
+  }
 
   function handleReset() {
     setTheme('light');
     setSidebarMode('persistent');
-    setCurrencyCode(null);
     setCurrencySymbol('$');
     setDateFormat('MMM d, yyyy');
     setShowMerchantIcons(true);
@@ -94,6 +132,19 @@ export function PreferencesPanel() {
         confirmLabel="Reset"
         danger
       />
+
+      {confirming.value && (
+        <BudgetCurrencyChangeModal
+          isOpen={confirming.isOpen}
+          onClose={() => setPendingCurrency(null)}
+          from={budget}
+          to={confirming.value}
+          budgetAccounts={budgetAccounts}
+          onChange={(choice) => {
+            if (confirming.value) applyCurrency(confirming.value, choice);
+          }}
+        />
+      )}
 
       <div className="bg-surface-alt rounded-lg p-5 space-y-4">
         <h3 className="text-sm font-medium text-text">Theme</h3>
@@ -189,12 +240,13 @@ export function PreferencesPanel() {
 
       <div className="bg-surface-alt rounded-lg p-5 space-y-4">
         <h3 className="text-sm font-medium text-text">Budget Currency</h3>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <select
             aria-label="Budget currency"
-            value={budget}
-            onChange={(e) => setCurrencyCode(e.target.value)}
-            className="min-w-24 text-sm border border-border rounded-md px-3 py-1.5 bg-surface text-text focus:outline-none focus:ring-1 focus:ring-brand-600 focus:border-brand-600 max-md:min-h-11"
+            value={shownBudget}
+            disabled={!canSave || saveCurrency.isPending || !currencyOverview}
+            onChange={(e) => chooseCurrency(e.target.value)}
+            className="min-w-24 text-sm border border-border rounded-md px-3 py-1.5 bg-surface text-text focus:outline-none focus:ring-1 focus:ring-brand-600 focus:border-brand-600 max-md:min-h-11 disabled:opacity-50"
           >
             {budgetCodeOptions.map((code) => (
               <option key={code} value={code}>
@@ -203,9 +255,15 @@ export function PreferencesPanel() {
             ))}
           </select>
           <span className="text-xs text-text-tertiary">
-            Accounts in another currency stay off budget and out of net worth.
+            Accounts in another currency are converted with the rates in Settings → Currencies.
           </span>
         </div>
+        <SavingPausedHint />
+        {saveCurrency.error && (
+          <p role="alert" className="text-xs text-negative">
+            {saveCurrency.error.message}
+          </p>
+        )}
       </div>
 
       <div className="bg-surface-alt rounded-lg p-5 space-y-4">

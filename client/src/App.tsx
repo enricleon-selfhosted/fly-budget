@@ -1,6 +1,7 @@
 import { BrowserRouter, HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppShell } from './components/layout/AppShell';
 import { AuthGate } from './components/auth/AuthGate';
+import { BudgetCurrencySync } from './components/settings/BudgetCurrencySync';
 import { IS_DEMO } from './demo/demoApi';
 import WelcomePage from './pages/Welcome';
 import DashboardPage from './pages/Dashboard';
@@ -28,6 +29,8 @@ const Router = isElectron || IS_DEMO ? HashRouter : BrowserRouter;
 export default function App() {
   return (
     <AuthGate>
+      {/* Keeps the budget's currency in step with the server, the welcome page included */}
+      <BudgetCurrencySync />
       <Router>
         <Routes>
           <Route path="/welcome" element={<WelcomePage />} />

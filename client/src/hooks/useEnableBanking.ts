@@ -57,13 +57,11 @@ export function useMapEnableBankingAccounts() {
   return useMutation({
     mutationFn: ({
       connectionId,
-      budgetCurrency,
       accounts,
     }: {
       connectionId: string;
-      budgetCurrency: string;
       accounts: EnableBankingMappingAction[];
-    }) => api.mapEnableBankingAccounts(connectionId, budgetCurrency, accounts),
+    }) => api.mapEnableBankingAccounts(connectionId, accounts),
     onSuccess: () => invalidateBudgetData(qc),
   });
 }

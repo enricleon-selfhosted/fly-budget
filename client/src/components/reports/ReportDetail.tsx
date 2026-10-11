@@ -22,6 +22,7 @@ import { usePayees } from '../../hooks/usePayees';
 import { useTransactions } from '../../hooks/useTransactions';
 import { usePreferencesStore } from '../../store/preferencesStore';
 import { formatCurrency } from '../../utils/currency';
+import { valueInBudget } from '../../utils/fxDisplay';
 import { downloadCsv } from '../../utils/exportCsv';
 import { dayBounds, monthCount } from '../../utils/dateRange';
 import { CALENDAR_MONTHS_MAX } from '../../utils/calendarLayout';
@@ -826,8 +827,10 @@ function DayTransactions({ day, onClose }: { day: string; onClose: () => void })
       (!t.transferTransactionId || t.categoryId) &&
       accountsById.get(t.accountId)?.isOffBudget === 0,
   );
-  const moneyIn = rows.reduce((s, t) => s + Math.max(t.amount, 0), 0);
-  const moneyOut = rows.reduce((s, t) => s - Math.min(t.amount, 0), 0);
+  // In the budget's currency, like the calendar; rows still waiting for a rate add nothing
+  const values = rows.map((t) => valueInBudget(t) ?? 0);
+  const moneyIn = values.reduce((s, v) => s + Math.max(v, 0), 0);
+  const moneyOut = values.reduce((s, v) => s - Math.min(v, 0), 0);
 
   return (
     <Card padding="none" className="overflow-hidden">
@@ -900,12 +903,14 @@ function DayTransactions({ day, onClose }: { day: string; onClose: () => void })
             {
               label: 'Amount',
               align: 'right',
-              cell: (t) =>
-                t.amount > 0 ? (
-                  <span className="text-positive">+{formatCurrency(t.amount)}</span>
+              cell: (t) => {
+                const amount = formatCurrency(t.amount, accountsById.get(t.accountId)?.currency);
+                return t.amount > 0 ? (
+                  <span className="text-positive">+{amount}</span>
                 ) : (
-                  <span className="text-text">{formatCurrency(t.amount)}</span>
-                ),
+                  <span className="text-text">{amount}</span>
+                );
+              },
             },
           ]}
         />
