@@ -7,7 +7,7 @@ import { useCategories } from '../../hooks/useCategories';
 import { usePayees } from '../../hooks/usePayees';
 import { useAccounts } from '../../hooks/useAccounts';
 import { TransactionFilters, DEFAULT_FILTERS, filtersToParams } from './TransactionFilters';
-import { TransactionFormRow } from './TransactionFormRow';
+import { TransactionFormRow, type TransactionFormValues } from './TransactionFormRow';
 import { TransactionRow } from './TransactionRow';
 import { TransactionCard } from './TransactionCard';
 import { WaitingTransactions } from './WaitingTransactions';
@@ -21,9 +21,9 @@ import { useOpenFromLink } from '../../hooks/useOpenFromLink';
 import { docsUrl } from '../../utils/project';
 import { useAddTransaction } from '../../hooks/useOffline';
 import { formatCurrency } from '../../utils/currency';
+import { transferRequest, type TransferAccount } from '../../utils/transfers';
 import type { FilterState } from './TransactionFilters';
 import type { CategoryGroup, Transaction } from '../../types';
-import type { CreateTransactionData } from '../../api/transactions';
 
 /** A day's absolute amounts, one total per currency (null = the budget's) */
 function sumByCurrency(
@@ -195,22 +195,27 @@ export function TransactionTable({
     return result;
   }, [transactions, accountInfoMap]);
 
-  function handleCreate(data: CreateTransactionData) {
+  /** An account as the transfer rules see it (one not loaded yet: the budget's currency, on budget) */
+  function transferAccount(id: string): TransferAccount {
+    return accounts.find((a) => a.id === id) ?? { currency: null, isOffBudget: 0 };
+  }
+
+  // `otherAmount`: the other account's amount when the transfer crosses currencies (D25)
+  function handleCreate({ data, otherAmount }: TransactionFormValues) {
     if (data.categoryId?.startsWith('transfer:') && accountId) {
-      const toAccountId = data.categoryId.slice('transfer:'.length);
-      newTx.add(
+      const otherId = data.categoryId.slice('transfer:'.length);
+      const request = transferRequest(
         {
-          kind: 'transfer',
-          data: {
-            fromAccountId: accountId,
-            toAccountId,
-            date: data.date,
-            amount: Math.abs(data.amount),
-            notes: data.notes,
-          },
+          accountId,
+          otherAccountId: otherId,
+          signedAmount: data.amount,
+          otherAmount,
+          date: data.date,
+          notes: data.notes,
         },
-        () => setShowAdd(false),
+        { self: transferAccount(accountId), other: transferAccount(otherId) },
       );
+      newTx.add({ kind: 'transfer', data: request }, () => setShowAdd(false));
       return;
     }
     newTx.add({ kind: 'transaction', data }, () => setShowAdd(false));
@@ -260,6 +265,7 @@ export function TransactionTable({
               accountId={accountId}
               categoryName={(id) => categoryMap.get(id)?.name}
               accountName={(id) => accountInfoMap.get(id)?.name}
+              accountCurrency={currencyOf}
             />
           )}
           {showAdd && accountId && !isPhone && (
