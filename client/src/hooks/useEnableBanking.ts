@@ -1,17 +1,20 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import * as api from '../api/enableBanking';
 import type { EnableBankingMappingAction } from '../types';
+import { refreshBudgetFigures, refreshRecurring } from './budgetFigures';
 
 const STATUS = ['enablebanking-status'];
 const CONNECTIONS = ['enablebanking-connections'];
 
-/** What a sync or mapping change can touch */
+/**
+ * What a sync or mapping change can touch: new accounts, payees and transactions, exchanges and
+ * transfers it links, and recurring items it pays (docs/enable-banking D29)
+ */
 function invalidateBudgetData(qc: QueryClient) {
   qc.invalidateQueries({ queryKey: CONNECTIONS });
-  qc.invalidateQueries({ queryKey: ['accounts'] });
-  qc.invalidateQueries({ queryKey: ['transactions'] });
   qc.invalidateQueries({ queryKey: ['payees'] });
-  qc.invalidateQueries({ queryKey: ['budget'] });
+  refreshBudgetFigures(qc);
+  refreshRecurring(qc);
 }
 
 export function useEnableBankingStatus() {

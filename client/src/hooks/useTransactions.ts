@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tansta
 import * as txApi from '../api/transactions';
 import { useUndoStore } from '../store/undoStore';
 import type { Transaction, TransactionQueryParams } from '../types';
+import { refreshBudgetFigures } from './budgetFigures';
 
 function findTxInCache(qc: QueryClient, id: string): Transaction | undefined {
   const caches = qc.getQueriesData<Transaction[]>({ queryKey: ['transactions'] });
@@ -129,17 +130,41 @@ export function useDeleteTransaction() {
   });
 }
 
+/** What "Link as transfer" offers for a transaction (loaded when `enabled`) */
+export function useTransferCandidates(id: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ['transfer-candidates', id],
+    queryFn: () => txApi.getTransferCandidates(id!),
+    enabled: enabled && !!id,
+  });
+}
+
+/**
+ * Two existing transactions become one transfer (or an exchange, across currencies); the payees
+ * and budget figures change with it
+ */
+export function useLinkTransfer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, otherId }: { id: string; otherId: string }) =>
+      txApi.linkTransfer(id, otherId),
+    onSuccess: () => {
+      refreshBudgetFigures(qc);
+      qc.invalidateQueries({ queryKey: ['payees'] });
+      qc.invalidateQueries({ queryKey: ['transfer-candidates'] });
+    },
+  });
+}
+
 /** Turns a transfer back into two transactions; the payees and budget figures change with it */
 export function useUnlinkTransfer() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => txApi.unlinkTransfer(id),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['transactions'] });
-      qc.invalidateQueries({ queryKey: ['accounts'] });
+      refreshBudgetFigures(qc);
       qc.invalidateQueries({ queryKey: ['payees'] });
-      qc.invalidateQueries({ queryKey: ['budget'] });
-      qc.invalidateQueries({ queryKey: ['budget-summary'] });
+      qc.invalidateQueries({ queryKey: ['transfer-candidates'] });
     },
   });
 }
@@ -161,15 +186,14 @@ export function useCreateTransfer() {
   return useMutation({
     mutationFn: txApi.createTransfer,
     onSuccess: (created) => {
-      qc.invalidateQueries({ queryKey: ['transactions'] });
-      qc.invalidateQueries({ queryKey: ['accounts'] });
+      // An exchange or a transfer across the budget's edge (with a category) moves budget figures
+      refreshBudgetFigures(qc);
       const ids = created.map((t) => t.id);
       useUndoStore.getState().push({
         description: `Create transfer`,
         undo: async () => {
           for (const id of ids) await txApi.deleteTransaction(id);
-          qc.invalidateQueries({ queryKey: ['transactions'] });
-          qc.invalidateQueries({ queryKey: ['accounts'] });
+          refreshBudgetFigures(qc);
         },
         redo: async () => {
           if (created.length >= 2) {
@@ -178,11 +202,13 @@ export function useCreateTransfer() {
               toAccountId: created[1].accountId,
               date: created[0].date,
               amount: Math.abs(created[0].amount),
+              // An exchange keeps what arrived, and a category on the budget side
+              toAmount: Math.abs(created[1].amount),
+              categoryId: created[0].categoryId ?? created[1].categoryId,
               notes: created[0].notes,
             });
           }
-          qc.invalidateQueries({ queryKey: ['transactions'] });
-          qc.invalidateQueries({ queryKey: ['accounts'] });
+          refreshBudgetFigures(qc);
         },
       });
     },

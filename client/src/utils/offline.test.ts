@@ -114,6 +114,16 @@ describe('waiting transactions (property-based)', () => {
     );
   });
 
+  it('shows an exchange arriving as the amount in the other currency', () => {
+    fc.assert(
+      fc.property(transferItem, fc.integer({ min: 1, max: 10_000_000 }), (t, toAmount) => {
+        const exchange = { ...t, data: { ...t.data, toAmount } } as OutboxItem;
+        expect(outboxEntryFor(exchange, t.data.toAccountId)!.amount).toBe(toAmount);
+        expect(outboxEntryFor(exchange, t.data.fromAccountId)!.amount).toBe(-t.data.amount);
+      }),
+    );
+  });
+
   it('lists an item only in the accounts it touches, and always in "all accounts"', () => {
     fc.assert(
       fc.property(item, fc.constantFrom('a', 'b', 'c'), (i, account) => {
