@@ -51,7 +51,7 @@ export default function AccountTransactionsPage() {
             <span
               className={`text-base font-medium tabular-nums ${account.balance < 0 ? 'text-negative' : 'text-text-secondary'}`}
             >
-              {formatCurrency(account.balance)}
+              {formatCurrency(account.balance, account.currency)}
             </span>
           </div>
           <div className="flex items-center gap-2">

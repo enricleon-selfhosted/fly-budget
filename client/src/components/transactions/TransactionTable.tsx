@@ -22,8 +22,21 @@ import { docsUrl } from '../../utils/project';
 import { useAddTransaction } from '../../hooks/useOffline';
 import { formatCurrency } from '../../utils/currency';
 import type { FilterState } from './TransactionFilters';
-import type { CategoryGroup } from '../../types';
+import type { CategoryGroup, Transaction } from '../../types';
 import type { CreateTransactionData } from '../../api/transactions';
+
+/** A day's absolute amounts, one total per currency (null = the budget's) */
+function sumByCurrency(
+  txs: Transaction[],
+  accounts: ReadonlyMap<string, { currency: string | null }>,
+): Array<[string | null, number]> {
+  const totals = new Map<string | null, number>();
+  for (const tx of txs) {
+    const currency = accounts.get(tx.accountId)?.currency ?? null;
+    totals.set(currency, (totals.get(currency) ?? 0) + Math.abs(tx.amount));
+  }
+  return [...totals];
+}
 
 interface Props {
   accountId?: string;
@@ -103,9 +116,17 @@ export function TransactionTable({
   }, [groups]);
 
   const accountInfoMap = useMemo(
-    () => new Map(accounts.map((a) => [a.id, { name: a.name, type: a.type, logo: a.logo }])),
+    () =>
+      new Map(
+        accounts.map((a) => [
+          a.id,
+          { name: a.name, type: a.type, logo: a.logo, currency: a.currency },
+        ]),
+      ),
     [accounts],
   );
+  // null = the budget's currency
+  const currencyOf = (accountId: string) => accountInfoMap.get(accountId)?.currency ?? null;
 
   const selectedTx = useMemo(
     () => (detailId ? (transactions.find((tx) => tx.id === detailId) ?? null) : null),
@@ -139,9 +160,13 @@ export function TransactionTable({
   }, [panelVisible]);
 
   const groupedByDate = useMemo(() => {
-    const result: Array<{ date: string; txs: typeof transactions; total: number }> = [];
+    const result: Array<{
+      date: string;
+      txs: Transaction[];
+      totals: Array<[string | null, number]>;
+    }> = [];
     let currentDate = '';
-    let currentTxs: typeof transactions = [];
+    let currentTxs: Transaction[] = [];
 
     for (const tx of transactions) {
       if (tx.date !== currentDate) {
@@ -149,7 +174,7 @@ export function TransactionTable({
           result.push({
             date: currentDate,
             txs: currentTxs,
-            total: currentTxs.reduce((sum, t) => sum + Math.abs(t.amount), 0),
+            totals: sumByCurrency(currentTxs, accountInfoMap),
           });
         }
         currentDate = tx.date;
@@ -163,12 +188,12 @@ export function TransactionTable({
       result.push({
         date: currentDate,
         txs: currentTxs,
-        total: currentTxs.reduce((sum, t) => sum + Math.abs(t.amount), 0),
+        totals: sumByCurrency(currentTxs, accountInfoMap),
       });
     }
 
     return result;
-  }, [transactions]);
+  }, [transactions, accountInfoMap]);
 
   function handleCreate(data: CreateTransactionData) {
     if (data.categoryId?.startsWith('transfer:') && accountId) {
@@ -318,7 +343,9 @@ export function TransactionTable({
                     {format(parseISO(group.date), 'MMMM d, yyyy')}
                   </span>
                   <span className="text-sm font-medium text-text-secondary tabular-nums">
-                    {formatCurrency(group.total)}
+                    {group.totals
+                      .map(([currency, total]) => formatCurrency(total, currency))
+                      .join(' · ')}
                   </span>
                 </div>
 
@@ -334,6 +361,7 @@ export function TransactionTable({
                       accountName={
                         showAccountCol ? accountInfoMap.get(tx.accountId)?.name : undefined
                       }
+                      currency={currencyOf(tx.accountId)}
                       isSelected={detailId === tx.id}
                       onOpenDetail={setDetailId}
                     />
@@ -357,6 +385,7 @@ export function TransactionTable({
                         showAccountCol ? accountInfoMap.get(tx.accountId)?.logo : undefined
                       }
                       showAccountCol={showAccountCol}
+                      currency={currencyOf(tx.accountId)}
                       isSelected={detailId === tx.id}
                       onOpenDetail={setDetailId}
                       onFilterCategory={(catId) =>

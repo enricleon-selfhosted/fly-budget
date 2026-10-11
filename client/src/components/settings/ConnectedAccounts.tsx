@@ -1,19 +1,24 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { RefreshCw, Plus, Loader2 } from 'lucide-react';
 import { usePlaidStatus, usePlaidItems, useSyncAll } from '../../hooks/usePlaid';
 import { useSimplefinConnections, useSyncAllSimplefin } from '../../hooks/useSimplefin';
+import { useEnableBankingConnections } from '../../hooks/useEnableBanking';
 import { PlaidConfigForm } from '../plaid/PlaidConfigForm';
 import { ConnectBankModal } from '../plaid/ConnectBankModal';
 import { ConnectedInstitutionCard } from '../plaid/ConnectedInstitutionCard';
 import { SimplefinConnectModal } from '../simplefin/SimplefinConnectModal';
 import { SimplefinConnectionCard } from '../simplefin/SimplefinConnectionCard';
 import { SimplefinConfigForm } from '../simplefin/SimplefinConfigForm';
+import { EnableBankingPanel } from '../enablebanking/EnableBankingPanel';
 import { Button } from '../ui/Button';
-import type { SimplefinSetupResult } from '../../types';
+import type { EnableBankingConnection, SimplefinSetupResult } from '../../types';
 import { IS_DEMO } from '../../demo/demoApi';
 import { NotInDemo } from '../demo/NotInDemo';
 
-type Provider = 'plaid' | 'simplefin';
+type Provider = 'plaid' | 'simplefin' | 'enablebanking';
+
+const NO_ENABLE_BANKING: EnableBankingConnection[] = [];
 
 export function ConnectedAccounts() {
   return IS_DEMO ? <ConnectedAccountsDemo /> : <ConnectedAccountsSettings />;
@@ -38,9 +43,15 @@ function ConnectedAccountsSettings() {
   const { data: status, isLoading: statusLoading } = usePlaidStatus();
   const { data: items = [], isLoading: itemsLoading } = usePlaidItems();
   const { data: sfConnections = [], isLoading: sfLoading } = useSimplefinConnections();
+  const { data: ebConnections = NO_ENABLE_BANKING } = useEnableBankingConnections();
   const syncAll = useSyncAll();
   const syncAllSf = useSyncAllSimplefin();
-  const [provider, setProvider] = useState<Provider>('plaid');
+  // ?provider=enablebanking (a link straight to Enable Banking) opens that tab, until the user picks another
+  const [searchParams] = useSearchParams();
+  const [chosenProvider, setChosenProvider] = useState<Provider | null>(null);
+  const provider: Provider =
+    chosenProvider ??
+    (searchParams.get('provider') === 'enablebanking' ? 'enablebanking' : 'plaid');
   const [showConnect, setShowConnect] = useState(false);
   const [showSimplefin, setShowSimplefin] = useState(false);
   const [sfSetupResult, setSfSetupResult] = useState<SimplefinSetupResult | undefined>();
@@ -66,10 +77,10 @@ function ConnectedAccountsSettings() {
       </div>
 
       {/* Provider toggle */}
-      <div className="flex rounded-lg bg-surface-alt p-1 w-fit">
+      <div className="flex max-w-full overflow-x-auto rounded-lg bg-surface-alt p-1 w-fit">
         <button
-          onClick={() => setProvider('plaid')}
-          className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ease-in-out ${
+          onClick={() => setChosenProvider('plaid')}
+          className={`whitespace-nowrap shrink-0 px-4 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ease-in-out ${
             provider === 'plaid'
               ? 'bg-surface text-text shadow-sm ring-2 ring-brand-600'
               : 'text-text-tertiary hover:text-text-secondary ring-0 ring-transparent'
@@ -83,8 +94,8 @@ function ConnectedAccountsSettings() {
           )}
         </button>
         <button
-          onClick={() => setProvider('simplefin')}
-          className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ease-in-out ${
+          onClick={() => setChosenProvider('simplefin')}
+          className={`whitespace-nowrap shrink-0 px-4 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ease-in-out ${
             provider === 'simplefin'
               ? 'bg-surface text-text shadow-sm ring-2 ring-brand-600'
               : 'text-text-tertiary hover:text-text-secondary ring-0 ring-transparent'
@@ -94,6 +105,21 @@ function ConnectedAccountsSettings() {
           {sfConnections.length > 0 && (
             <span className="ml-1.5 text-[10px] bg-brand-50 text-brand-600 px-1.5 py-0.5 rounded-full">
               {sfConnections.length}
+            </span>
+          )}
+        </button>
+        <button
+          onClick={() => setChosenProvider('enablebanking')}
+          className={`whitespace-nowrap shrink-0 px-4 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ease-in-out ${
+            provider === 'enablebanking'
+              ? 'bg-surface text-text shadow-sm ring-2 ring-brand-600'
+              : 'text-text-tertiary hover:text-text-secondary ring-0 ring-transparent'
+          }`}
+        >
+          Enable Banking<span className="max-md:hidden">&nbsp;(Europe)</span>
+          {ebConnections.length > 0 && (
+            <span className="ml-1.5 text-[10px] bg-brand-50 text-brand-600 px-1.5 py-0.5 rounded-full">
+              {ebConnections.length}
             </span>
           )}
         </button>
@@ -218,6 +244,8 @@ function ConnectedAccountsSettings() {
           </div>
         </div>
       )}
+
+      {provider === 'enablebanking' && <EnableBankingPanel />}
 
       <ConnectBankModal isOpen={showConnect} onClose={() => setShowConnect(false)} />
       <SimplefinConnectModal

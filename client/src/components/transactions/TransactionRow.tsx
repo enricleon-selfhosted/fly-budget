@@ -21,6 +21,8 @@ interface Props {
   accountType?: string;
   accountLogo?: string | null;
   showAccountCol?: boolean;
+  /** The account's currency when it isn't the budget's (null or unset = the budget's) */
+  currency?: string | null;
   isSelected?: boolean;
   onOpenDetail: (id: string) => void;
   onFilterCategory?: (catId: string) => void;
@@ -37,6 +39,7 @@ export function TransactionRow({
   accountType,
   accountLogo,
   showAccountCol,
+  currency,
   isSelected,
   onOpenDetail,
   onFilterCategory,
@@ -248,7 +251,7 @@ export function TransactionRow({
           <span
             className={`text-sm font-medium tabular-nums ${tx.amount > 0 ? 'text-positive' : 'text-text'}`}
           >
-            {formatCurrency(Math.abs(tx.amount))}
+            {formatCurrency(Math.abs(tx.amount), currency)}
           </span>
         </div>
 
@@ -286,7 +289,7 @@ export function TransactionRow({
               <span
                 className={`text-xs tabular-nums shrink-0 ${child.amount > 0 ? 'text-positive' : 'text-text-secondary'}`}
               >
-                {formatCurrency(Math.abs(child.amount))}
+                {formatCurrency(Math.abs(child.amount), currency)}
               </span>
             </div>
           );

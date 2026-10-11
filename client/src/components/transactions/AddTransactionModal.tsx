@@ -41,7 +41,10 @@ export function AddTransactionModal({ isOpen, onClose }: Props) {
   const offBudgetAccounts = openAccounts.filter((a) => a.isOffBudget);
   const selectedAccount = openAccounts.find((a) => a.id === accountId);
   // Once an account is chosen, the category list also offers a transfer to any other account
-  const transferAccounts = accountId ? openAccounts.filter((a) => a.id !== accountId) : [];
+  // A transfer moves the same amount on both sides, so only between accounts in one currency
+  const transferAccounts = accountId
+    ? openAccounts.filter((a) => a.id !== accountId && a.currency === selectedAccount?.currency)
+    : [];
   const transferToId = categoryId?.startsWith('transfer:')
     ? categoryId.slice('transfer:'.length)
     : null;
@@ -156,7 +159,7 @@ export function AddTransactionModal({ isOpen, onClose }: Props) {
           <CurrencyInput
             value={amount}
             onChange={setAmount}
-            placeholder="$0.00"
+            currency={selectedAccount?.currency}
             aria-label="Amount"
           />
         </div>
@@ -238,7 +241,7 @@ export function AddTransactionModal({ isOpen, onClose }: Props) {
                         <span
                           className={`text-xs tabular-nums shrink-0 ${a.balance >= 0 ? 'text-text-tertiary' : 'text-negative'}`}
                         >
-                          {formatCurrency(a.balance)}
+                          {formatCurrency(a.balance, a.currency)}
                         </span>
                       </button>
                     ))}
@@ -266,7 +269,7 @@ export function AddTransactionModal({ isOpen, onClose }: Props) {
                         <span
                           className={`text-xs tabular-nums shrink-0 ${a.balance >= 0 ? 'text-text-tertiary' : 'text-negative'}`}
                         >
-                          {formatCurrency(a.balance)}
+                          {formatCurrency(a.balance, a.currency)}
                         </span>
                       </button>
                     ))}

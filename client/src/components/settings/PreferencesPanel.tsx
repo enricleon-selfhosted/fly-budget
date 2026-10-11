@@ -7,6 +7,7 @@ import {
 } from '../../store/preferencesStore';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { IS_DEMO } from '../../demo/isDemo';
+import { CURRENCY_CODES, useBudgetCurrency } from '../../utils/budgetCurrency';
 
 const themeOptions: { value: Theme; label: string }[] = [
   { value: 'light', label: 'Light' },
@@ -30,6 +31,7 @@ export function PreferencesPanel() {
   const {
     theme,
     currencySymbol,
+    setCurrencyCode,
     dateFormat,
     sidebarMode,
     showMerchantIcons,
@@ -43,11 +45,19 @@ export function PreferencesPanel() {
     setShowCategoryIcons,
     setShowAccountIcons,
   } = usePreferencesStore();
+  // The code as shown: the one the user chose, or the one guessed from the symbol
+  const budget = useBudgetCurrency();
+  const budgetCodeOptions: readonly string[] = (CURRENCY_CODES as readonly string[]).includes(
+    budget,
+  )
+    ? CURRENCY_CODES
+    : [...CURRENCY_CODES, budget];
   const [resetOpen, setResetOpen] = useState(false);
 
   function handleReset() {
     setTheme('light');
     setSidebarMode('persistent');
+    setCurrencyCode(null);
     setCurrencySymbol('$');
     setDateFormat('MMM d, yyyy');
     setShowMerchantIcons(true);
@@ -175,6 +185,27 @@ export function PreferencesPanel() {
             </div>
           </div>
         ))}
+      </div>
+
+      <div className="bg-surface-alt rounded-lg p-5 space-y-4">
+        <h3 className="text-sm font-medium text-text">Budget Currency</h3>
+        <div className="flex items-center gap-3">
+          <select
+            aria-label="Budget currency"
+            value={budget}
+            onChange={(e) => setCurrencyCode(e.target.value)}
+            className="min-w-24 text-sm border border-border rounded-md px-3 py-1.5 bg-surface text-text focus:outline-none focus:ring-1 focus:ring-brand-600 focus:border-brand-600 max-md:min-h-11"
+          >
+            {budgetCodeOptions.map((code) => (
+              <option key={code} value={code}>
+                {code}
+              </option>
+            ))}
+          </select>
+          <span className="text-xs text-text-tertiary">
+            Accounts in another currency stay off budget and out of net worth.
+          </span>
+        </div>
       </div>
 
       <div className="bg-surface-alt rounded-lg p-5 space-y-4">

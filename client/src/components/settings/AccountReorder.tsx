@@ -55,7 +55,7 @@ function SortableAccountRow({ account }: { account: Account }) {
       <span
         className={`text-sm tabular-nums font-medium shrink-0 ${account.balance >= 0 ? 'text-text-secondary' : 'text-negative'}`}
       >
-        {formatCurrency(account.balance)}
+        {formatCurrency(account.balance, account.currency)}
       </span>
     </div>
   );
