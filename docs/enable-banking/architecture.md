@@ -18,7 +18,7 @@ services/enableBanking/            provider adapter
                                    syncWindowStart, shouldSkipBackgroundSync, consentEnded,
                                    localDay (no database, no clock)
   accountMapping.ts                applies a mapping plan: create / link / ignore bank accounts
-                                   (currency rules, D11)
+                                   (currency rules, D11, multi-currency M1/M2)
   syncService.ts                   sync one connection / all (status, windows, balances)
   consent.ts                       pending consents keyed by state (in memory, single use;
                                    fail/complete check the attempt's id)
@@ -42,7 +42,7 @@ services/ruleService.ts            insertNewTransaction (rules, payees) — unch
 services/transactionHelpers.ts     linkTransfer / unlinkTransfer (new), next to the transactions
                                    API's transfer writes (createTransfer, updateTransferSide)
 services/matchingEngine.ts         autoMatchImported: recurring items paid by imports (D29)
-services/accountService.ts         createAccount, setBalanceTo, openAccount, accountSummary
+services/accountService.ts         createAccount, updateAccount, setBalanceTo, openAccount, accountSummary
                                    (shared with the accounts API)
 utils/money.ts                     exact decimal string → hundredths (D12), shared
 utils/text.ts                      cleanText for untrusted text (bank data, User-Agent), shared
@@ -98,7 +98,8 @@ be the same exchange) are pure functions in `matching.ts`.
 ## Data model (migration `0021_enable_banking`, hand-written like `0019`/`0020`)
 
 ```
-accounts.currency            text, nullable — ISO 4217 when it differs from the budget's (D11)
+accounts.currency            text, nullable — ISO 4217 when it differs from the budget's (D11,
+                             the budget's stored on the server since multi-currency M2)
 
 enable_banking_config        one row, id = 'default'
   application_id             text            Enable Banking application id (kid)

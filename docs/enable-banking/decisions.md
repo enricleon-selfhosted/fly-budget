@@ -135,6 +135,10 @@ date on its next sync, whenever the connection's other accounts last synced.
 - No exchange rates: YNAB is single-currency too, and conversion needs a rate source (network,
   CSP, history). Revisit later.
 
+Superseded in part by [multi-currency M1–M6](../multi-currency/decisions.md): accounts in another
+currency start off budget but can be put on budget, the budget currency is stored on the server,
+and amounts are converted at stored rates.
+
 ## D12 — Amounts stay in hundredths for every currency
 
 FlyBudget's invariant (integer "cents" = hundredths) is kept for all currencies. Bank amounts are
@@ -203,6 +207,10 @@ server table). The server never needs it except when mapping bank accounts, wher
 sends it. Accounts store a currency only when it differs from the budget's, so a device with a
 different preference can't corrupt data, only show a foreign account's badge differently.
 Moving it into the budget is listed under "Later" in the plan.
+
+Superseded by [multi-currency M2](../multi-currency/decisions.md): the budget currency is stored on
+the server (`budget_settings.currency`), and mapping bank accounts reads it there; the client no
+longer sends it.
 
 ## D22 — Foreign amounts show the ISO code and two decimals
 
