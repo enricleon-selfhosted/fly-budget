@@ -3,12 +3,15 @@ import express from 'express';
 import type { AddressInfo } from 'net';
 import type { Server } from 'http';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import { addDays, format } from 'date-fns';
 import { db } from '../db/index.js';
+import { transactions } from '../db/schema.js';
+import { MAX_DATE_FLEXIBILITY } from '../services/scheduleMatching.js';
 import { accountsRouter } from './accounts.js';
 import { schedulesRouter } from './schedules.js';
 
-// A recurring item can be recognized by the bank's text (decision D28). Its own file, so the
-// database holds only this test's data.
+// A recurring item can be recognized by the bank's text (decision D28), and how its occurrences
+// are matched. Its own file, so the database holds only this test's data.
 
 let server: Server;
 let base: string;
@@ -62,4 +65,50 @@ it('stores, changes and clears the bank text of a weekly, variable income', asyn
     matchText: 'x'.repeat(201),
   });
   expect(tooLong.status).toBe(400);
+});
+
+it('takes a date flexibility up to the most matching looks for', async () => {
+  const item = {
+    name: 'Rent',
+    amount: -90_000,
+    recurrenceType: 'monthly',
+    startDate: '2026-03-01',
+  };
+  const widest = await send('POST', '/schedules', {
+    ...item,
+    dateFlexibility: MAX_DATE_FLEXIBILITY,
+  });
+  expect(widest.status).toBe(201);
+  const wider = await send('POST', '/schedules', {
+    ...item,
+    dateFlexibility: MAX_DATE_FLEXIBILITY + 1,
+  });
+  expect(wider.status).toBe(400);
+});
+
+it('after an item changes direction, its past occurrences are still suggested matches in theirs', async () => {
+  const day = (offset: number) => format(addDays(new Date(), offset), 'yyyy-MM-dd');
+  const { body: account } = await send('POST', '/accounts', { name: 'Checking', type: 'checking' });
+  const { body: item } = await send('POST', '/schedules', {
+    name: 'Gym',
+    amount: -5_000,
+    recurrenceType: 'weekly',
+    startDate: day(-7),
+    accountId: account.id,
+  });
+  db.insert(transactions)
+    .values({ id: 'gym-paid', accountId: account.id, date: day(-7), amount: -5_000 })
+    .run();
+
+  // From now on it's a refund: future occurrences expect money in, last week's still money out
+  await send('PUT', `/schedules/${item.id}`, { amount: 5_000 });
+
+  const { body: suggestions } = await send('GET', '/schedules/match-suggestions');
+  const lastWeek = suggestions.find(
+    (s: { scheduleId: string; expectedAmount: number }) =>
+      s.scheduleId === item.id && s.expectedAmount === -5_000,
+  );
+  expect(lastWeek?.candidates.map((c: { transactionId: string }) => c.transactionId)).toEqual([
+    'gym-paid',
+  ]);
 });

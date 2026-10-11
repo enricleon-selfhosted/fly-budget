@@ -65,12 +65,15 @@ export function saveManualRate(base: string, quote: string, date: string, rate: 
   return { id, date, base, quote, rate, source: 'manual' as const };
 }
 
-/** Removes a rate typed in; downloaded rates can't be removed. Returns its pair, or null. */
-export function deleteManualRate(id: string): { base: string } | null {
-  const row = db.select().from(exchangeRates).where(eq(exchangeRates.id, id)).get();
-  if (!row || row.source !== 'manual') return null;
-  db.delete(exchangeRates).where(eq(exchangeRates.id, id)).run();
-  return { base: row.base };
+/** Removes the rate typed in for a date; downloaded rates can't be removed. Whether one was. */
+export function deleteManualRate(base: string, quote: string, date: string): boolean {
+  const id = rateId(base, quote, date);
+  return (
+    db
+      .delete(exchangeRates)
+      .where(and(eq(exchangeRates.id, id), eq(exchangeRates.source, 'manual')))
+      .run().changes > 0
+  );
 }
 
 /** A pair's most recent rates, newest first */

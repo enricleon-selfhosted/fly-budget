@@ -23,6 +23,7 @@ import {
   exchangeRates,
   transactions,
 } from '../db/schema.js';
+import { refreshFx } from './fx/fxService.js';
 
 // Full JSON backup of the user's data, and restoring one.
 //
@@ -76,12 +77,27 @@ export class InvalidBackupError extends Error {}
 
 type Row = Record<string, unknown>;
 
+/** Tables a backup made before budgeting across currencies doesn't have at all */
+const ADDED_FOR_CURRENCIES = ['budgetSettings', 'exchangeRates'] as const;
+
+/** A checked backup, ready to restore */
+export type ParsedBackup = {
+  tables: Record<BackupTable, Row[]>;
+  /**
+   * Tables to keep as they are: those a backup made before budgeting across currencies doesn't
+   * have (the budget currency would otherwise be forgotten). A newer backup always lists them,
+   * even empty.
+   */
+  keep: BackupTable[];
+};
+
 /**
  * Checks a backup's shape against the schema: every table is a list of rows, and every
  * column has the right type (SQLite would otherwise happily store "abc" as an amount).
- * Tables missing from older backups are restored as empty. Unknown fields are dropped.
+ * Tables missing from older backups are restored as empty, except the ones in `keep`.
+ * Unknown fields are dropped.
  */
-export function parseBackup(input: unknown): Record<BackupTable, Row[]> {
+export function parseBackup(input: unknown): ParsedBackup {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new InvalidBackupError('This is not a FlyBudget backup file');
   }
@@ -94,14 +110,14 @@ export function parseBackup(input: unknown): Record<BackupTable, Row[]> {
     throw new InvalidBackupError('This backup was made by a newer version of FlyBudget');
   }
 
-  const result = {} as Record<BackupTable, Row[]>;
+  const tables = {} as Record<BackupTable, Row[]>;
   for (const name of BACKUP_TABLES) {
     const rows = body[name] ?? [];
     if (!Array.isArray(rows) || rows.length > MAX_ROWS_PER_TABLE) {
       throw new InvalidBackupError(`"${name}" in the backup is not a list of rows`);
     }
     const columns = Object.entries(getTableColumns(TABLES[name]));
-    result[name] = rows.map((raw, i) => {
+    tables[name] = rows.map((raw, i) => {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
         throw new InvalidBackupError(`Row ${i + 1} of "${name}" is not valid`);
       }
@@ -127,7 +143,7 @@ export function parseBackup(input: unknown): Record<BackupTable, Row[]> {
       return row;
     });
   }
-  return result;
+  return { tables, keep: ADDED_FOR_CURRENCIES.filter((name) => body[name] === undefined) };
 }
 
 /** Copies the current database next to it before a restore replaces everything. */
@@ -139,21 +155,11 @@ export async function saveSafetyCopy(): Promise<string | null> {
   return path.basename(file);
 }
 
-/** Tables a backup made before budgeting across currencies doesn't have at all */
-const ADDED_FOR_CURRENCIES = ['budgetSettings', 'exchangeRates'] as const;
-
 /**
- * The tables to keep as they are when restoring `input`: those a backup made before budgeting
- * across currencies doesn't have (the budget currency would otherwise be forgotten). A newer
- * backup always lists them, even empty.
+ * Replaces all budget data with the backup's, in one transaction: all or nothing. Then works out
+ * the conversions again, with this installation's rates and budget currency when they were kept.
  */
-export function tablesToKeep(input: unknown): BackupTable[] {
-  const body = (input ?? {}) as Record<string, unknown>;
-  return ADDED_FOR_CURRENCIES.filter((name) => body[name] === undefined);
-}
-
-/** Replaces all budget data with the backup's, in one transaction: all or nothing. */
-export function restoreBackup(data: Record<BackupTable, Row[]>, keep: readonly BackupTable[] = []) {
+export function restoreBackup({ tables: data, keep }: ParsedBackup) {
   // Bank connections aren't in backups; remember which accounts they sync into
   const plaidLinks = db
     .select({ id: plaidAccountMappings.id, accountId: plaidAccountMappings.accountId })
@@ -201,6 +207,7 @@ export function restoreBackup(data: Record<BackupTable, Row[]>, keep: readonly B
       }
     }
   });
+  refreshFx('all');
 
   return Object.fromEntries(BACKUP_TABLES.map((name) => [name, data[name].length]));
 }

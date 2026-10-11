@@ -12,7 +12,7 @@ import {
   type WeekendAdjust,
 } from '../utils/recurrence.js';
 import { linkOccurrenceToTransaction } from './matchingEngine.js';
-import { convertTransactions } from './fx/fxService.js';
+import { afterTransactionsWritten } from './transactionFx.js';
 
 export function ensureOccurrences(scheduleId: string, throughDate: string): number {
   const schedule = db.select().from(schedules).where(eq(schedules.id, scheduleId)).get();
@@ -114,7 +114,7 @@ export function autoCreateDueScheduled(): number {
     .where(and(eq(schedules.status, 'active'), eq(schedules.autoCreate, 1)))
     .all();
 
-  let created = 0;
+  const created: string[] = [];
 
   for (const schedule of activeSchedules) {
     if (!schedule.accountId) continue;
@@ -164,14 +164,15 @@ export function autoCreateDueScheduled(): number {
           createdAt: new Date().toISOString(),
         })
         .run();
-      convertTransactions([txId]);
 
       linkOccurrenceToTransaction(occ.id, txId, 'automatic', 100);
-      created++;
+      created.push(txId);
     }
   }
 
-  return created;
+  // Those in accounts in another currency get their rates, all at once
+  afterTransactionsWritten(created);
+  return created.length;
 }
 
 export function migrateRecurrenceRules(): number {

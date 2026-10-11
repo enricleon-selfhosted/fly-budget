@@ -5,6 +5,8 @@ import {
   MATCH_WINDOW_DAYS,
   TRANSFER_WINDOW_DAYS,
   daysBetween,
+  exchangeSiblings,
+  looksLikeExchange,
   mentionsCurrency,
   pickExchangeCounterpart,
   pickManualMatch,
@@ -106,13 +108,17 @@ const toTransfer = (t: { id: string; accountId: string; offset: number; amount: 
   ({
     id: t.id,
     accountId: t.accountId,
+    currency: null,
     date: day(t.offset),
     amount: t.amount,
   }) satisfies TransferCandidate;
 
 describe('pickTransferCounterpart', () => {
-  const query = (over: Partial<Parameters<typeof pickTransferCounterpart>[0]> = {}) => ({
+  const query = (
+    over: Partial<Parameters<typeof pickTransferCounterpart>[0]> = {},
+  ): Parameters<typeof pickTransferCounterpart>[0] => ({
     accountId: 'A',
+    currency: null,
     date: day(0),
     amount: -1000,
     counterpartyAccountId: null,
@@ -159,15 +165,40 @@ describe('pickTransferCounterpart', () => {
     );
   });
 
+  it('never pairs accounts in different currencies, even when the bank names the account', () => {
+    const currency = fc.constantFrom(null, 'USD', 'GBP');
+    fc.assert(
+      fc.property(
+        fc.array(fc.tuple(transfer, currency), { maxLength: 12 }),
+        currency,
+        fc.constantFrom(null, 'B', 'C'),
+        fc.nat(2),
+        (raw, own, named, siblings) => {
+          const candidates = raw.map(([t, c]) => ({ ...toTransfer(t), currency: c }));
+          const picked = pickTransferCounterpart(
+            query({ currency: own, counterpartyAccountId: named, siblings }),
+            candidates,
+          );
+          if (picked !== null) expect(candidates.find((c) => c.id === picked)!.currency).toBe(own);
+        },
+      ),
+    );
+    // The only opposite amount, in the very account the bank names, but in another currency
+    const usd = { id: 'u', accountId: 'B', currency: 'USD', date: day(0), amount: 1000 };
+    expect(pickTransferCounterpart(query({ counterpartyAccountId: 'B' }), [usd])).toBeNull();
+    expect(pickTransferCounterpart(query(), [usd])).toBeNull();
+    expect(pickTransferCounterpart(query({ currency: 'USD' }), [usd])).toBe('u');
+  });
+
   it('when the bank names the account, never pairs with another account', () => {
-    const inC = { id: 'c1', accountId: 'C', date: day(0), amount: 1000 };
+    const inC = { id: 'c1', accountId: 'C', currency: null, date: day(0), amount: 1000 };
     expect(pickTransferCounterpart(query({ counterpartyAccountId: 'B' }), [inC])).toBeNull();
   });
 
   it('when the bank names the account, takes its closest candidate even among several', () => {
-    const near = { id: 'near', accountId: 'B', date: day(1), amount: 1000 };
-    const far = { id: 'far', accountId: 'B', date: day(3), amount: 1000 };
-    const other = { id: 'other', accountId: 'C', date: day(0), amount: 1000 };
+    const near = { id: 'near', accountId: 'B', currency: null, date: day(1), amount: 1000 };
+    const far = { id: 'far', accountId: 'B', currency: null, date: day(3), amount: 1000 };
+    const other = { id: 'other', accountId: 'C', currency: null, date: day(0), amount: 1000 };
     expect(
       pickTransferCounterpart(query({ counterpartyAccountId: 'B', siblings: 1 }), [
         far,
@@ -175,12 +206,12 @@ describe('pickTransferCounterpart', () => {
         near,
       ]),
     ).toBe('near');
-    const tie = { id: 'tie', accountId: 'B', date: day(-1), amount: 1000 };
+    const tie = { id: 'tie', accountId: 'B', currency: null, date: day(-1), amount: 1000 };
     expect(pickTransferCounterpart(query({ counterpartyAccountId: 'B' }), [near, tie])).toBeNull();
   });
 
   it('never pairs a zero amount', () => {
-    const zero = { id: 'z', accountId: 'B', date: day(0), amount: 0 };
+    const zero = { id: 'z', accountId: 'B', currency: null, date: day(0), amount: 0 };
     expect(pickTransferCounterpart(query({ amount: 0 }), [zero])).toBeNull();
   });
 });
@@ -261,5 +292,61 @@ describe('pickExchangeCounterpart', () => {
     };
     expect(pickExchangeCounterpart(query(0), [into])).toBe('x');
     expect(pickExchangeCounterpart(query(1), [into])).toBeNull();
+  });
+});
+
+describe('exchangeSiblings', () => {
+  const partners = new Map([
+    ['gbp', 'GBP'],
+    ['eur', 'EUR'],
+  ]);
+  const here = fc.record({
+    id: fc.constantFrom('self', 'a', 'b', 'c', 'd'),
+    amount: fc.constantFrom(-5_000, -1_000, 1_000, 5_000),
+    text: fc.constantFrom('Exchanged to EUR', 'Card payment', 'GBP top-up', 'eur'),
+  });
+
+  it('counts the other same-direction rows here that look like an exchange, never itself', () => {
+    fc.assert(
+      fc.property(
+        fc.array(here, { maxLength: 10 }),
+        fc.constantFrom(-1_000, 1_000),
+        (raw, amount) => {
+          const rows = raw.map((r) => ({ ...r, accountId: 'gbp', date: day(0) }));
+          const expected = rows.filter(
+            (r) =>
+              r.id !== 'self' &&
+              Math.sign(r.amount) === Math.sign(amount) &&
+              looksLikeExchange(r.text, 'GBP', partners),
+          ).length;
+          expect(exchangeSiblings(rows, 'self', amount, 'GBP', partners)).toBe(expected);
+          // Adding itself again changes nothing
+          const self = { id: 'self', accountId: 'gbp', date: day(0), amount, text: 'to EUR' };
+          expect(exchangeSiblings([...rows, self], 'self', amount, 'GBP', partners)).toBe(expected);
+        },
+      ),
+    );
+  });
+
+  it('ignores text naming only the account’s own currency, and the other direction', () => {
+    const row = (id: string, amount: number, text: string) => ({
+      id,
+      accountId: 'gbp',
+      date: day(0),
+      amount,
+      text,
+    });
+    expect(
+      exchangeSiblings(
+        [row('a', -1_000, 'GBP top-up'), row('b', 1_000, 'Exchanged from EUR')],
+        'self',
+        -2_000,
+        'GBP',
+        partners,
+      ),
+    ).toBe(0);
+    expect(
+      exchangeSiblings([row('c', -3_000, 'Exchanged to EUR')], 'self', -2_000, 'GBP', partners),
+    ).toBe(1);
   });
 });

@@ -8,7 +8,8 @@ import {
 } from '../../db/schema.js';
 
 // The enable_banking_* tables. Secrets (private key, session id) are decrypted only by the
-// functions that return them; everything else selects plain columns.
+// functions that return them; everything else selects plain columns. Writes that record when
+// they happened take the time from the caller (`at`, ISO), so the service's clock decides it.
 
 const CONFIG_ID = 'default';
 
@@ -69,11 +70,10 @@ export const enableBankingStore = {
     );
   },
 
-  saveConfig(config: StoredConfig) {
-    const now = new Date().toISOString();
+  saveConfig(config: StoredConfig, at = new Date().toISOString()) {
     db.insert(enableBankingConfig)
-      .values({ id: CONFIG_ID, ...config, createdAt: now, updatedAt: now })
-      .onConflictDoUpdate({ target: enableBankingConfig.id, set: { ...config, updatedAt: now } })
+      .values({ id: CONFIG_ID, ...config, createdAt: at, updatedAt: at })
+      .onConflictDoUpdate({ target: enableBankingConfig.id, set: { ...config, updatedAt: at } })
       .run();
   },
 
@@ -120,15 +120,18 @@ export const enableBankingStore = {
     );
   },
 
-  insertConnection(values: {
-    sessionId: string;
-    aspspName: string;
-    aspspCountry: string;
-    validUntil: string;
-  }): string {
+  insertConnection(
+    values: {
+      sessionId: string;
+      aspspName: string;
+      aspspCountry: string;
+      validUntil: string;
+    },
+    at = new Date().toISOString(),
+  ): string {
     const id = nanoid();
     db.insert(enableBankingConnections)
-      .values({ id, ...values, syncStatus: 'good', createdAt: new Date().toISOString() })
+      .values({ id, ...values, syncStatus: 'good', createdAt: at })
       .run();
     return id;
   },
@@ -174,11 +177,15 @@ export const enableBankingStore = {
    * get the new session's uid and details and keep their mapping (decision D18); new ones are
    * added, not imported until the user decides.
    */
-  bindAccounts(connectionId: string, accounts: readonly BankAccountInfo[]) {
+  bindAccounts(
+    connectionId: string,
+    accounts: readonly BankAccountInfo[],
+    at = new Date().toISOString(),
+  ) {
     db.transaction((tx) => {
       for (const account of accounts) {
         tx.insert(enableBankingAccounts)
-          .values({ id: nanoid(), connectionId, ...account, createdAt: new Date().toISOString() })
+          .values({ id: nanoid(), connectionId, ...account, createdAt: at })
           .onConflictDoUpdate({
             target: [enableBankingAccounts.connectionId, enableBankingAccounts.identificationHash],
             set: {

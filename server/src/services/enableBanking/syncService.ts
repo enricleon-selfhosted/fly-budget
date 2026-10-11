@@ -1,47 +1,49 @@
-import { eq } from 'drizzle-orm';
-import { format, parseISO, subDays } from 'date-fns';
-import { db } from '../../db/index.js';
-import { accounts } from '../../db/schema.js';
 import { logError } from '../../utils/log.js';
-import { accountTransactionSum } from '../balances.js';
+import { openAccount, setBalanceTo } from '../accountService.js';
 import { importTransactions } from '../bankSync/importTransactions.js';
+import type { ImportResult } from '../bankSync/types.js';
 import type { EnableBankingApi, PsuHeaders } from './client.js';
 import { createEnableBankingDataSource } from './dataSource.js';
 import { ReauthRequiredError, enableBankingErrorMessage } from './errors.js';
+import { consentEnded, localDay, shouldSkipBackgroundSync, syncWindowStart } from './rules.js';
 import { enableBankingStore } from './store.js';
 
 // Syncing a connection: read each imported account from where it left off, import through
-// the bank-sync core, record the bank's balance (decisions D7–D10).
+// the bank-sync core, record the bank's balance (decisions D7–D10). The rules are in rules.ts.
 
-/** Background syncs (server start) skip connections synced more recently than this (D10) */
-export const BACKGROUND_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
-/** Later syncs read again this many days before the last one, for late bookings (D9) */
-export const RESYNC_OVERLAP_DAYS = 10;
+/** The import counts a sync reports, summed over the connection's accounts */
+const COUNTS = ['added', 'matched', 'transfers', 'recurring'] as const;
+type ImportCounts = Pick<ImportResult, (typeof COUNTS)[number]>;
 
-export type SyncResult = {
+export type SyncResult = ImportCounts & {
   connectionId: string;
   aspspName: string;
-  added: number;
-  matched: number;
-  transfers: number;
-  /** Matched to an occurrence of a recurring item */
-  recurring: number;
   status: 'good' | 'error' | 'reauth_required';
   errors: string[];
   /** A background sync that didn't run because the connection synced recently */
   skipped?: boolean;
 };
 
-/** The first day to read: `syncFrom` on the first sync, else a little before the last one */
-export function syncWindowStart(
-  syncFrom: string | null,
-  lastSyncedAt: string | null,
-  today: string,
-): string {
-  const floor = syncFrom ?? format(subDays(parseISO(today), 90), 'yyyy-MM-dd');
-  if (!lastSyncedAt) return floor;
-  const overlap = format(subDays(parseISO(lastSyncedAt), RESYNC_OVERLAP_DAYS), 'yyyy-MM-dd');
-  return overlap > floor ? overlap : floor;
+/** A sync of this connection that imported nothing (yet) */
+export function emptySyncResult(
+  connection: { id: string; aspspName: string },
+  status: SyncResult['status'] = 'good',
+): SyncResult {
+  const counts = Object.fromEntries(COUNTS.map((k) => [k, 0])) as ImportCounts;
+  return {
+    connectionId: connection.id,
+    aspspName: connection.aspspName,
+    ...counts,
+    status,
+    errors: [],
+  };
+}
+
+/** The result with one account's import added in */
+export function addCounts(result: SyncResult, imported: ImportCounts): SyncResult {
+  const sum = { ...result };
+  for (const k of COUNTS) sum[k] += imported[k];
+  return sum;
 }
 
 export type SyncDeps = { api: EnableBankingApi; now: () => number };
@@ -69,34 +71,21 @@ async function runSync(
 ): Promise<SyncResult> {
   const connection = enableBankingStore.getConnection(connectionId);
   if (!connection) throw new Error('Enable Banking connection not found');
-  const result: SyncResult = {
-    connectionId,
-    aspspName: connection.aspspName,
-    added: 0,
-    matched: 0,
-    transfers: 0,
-    recurring: 0,
-    status: 'good',
-    errors: [],
-  };
+  let result = emptySyncResult(connection);
 
   const startedAt = now();
-  if (
-    background &&
-    connection.lastSyncedAt &&
-    startedAt - Date.parse(connection.lastSyncedAt) < BACKGROUND_SYNC_INTERVAL_MS
-  ) {
+  if (background && shouldSkipBackgroundSync(connection.lastSyncedAt, startedAt)) {
     const status = connection.syncStatus === 'syncing' ? 'good' : connection.syncStatus;
     return { ...result, skipped: true, status: status as SyncResult['status'] };
   }
-  if (Date.parse(connection.validUntil) <= startedAt) {
+  if (consentEnded(connection.validUntil, startedAt)) {
     const message = enableBankingErrorMessage(new ReauthRequiredError('consent ended'), '');
     enableBankingStore.setStatus(connectionId, 'reauth_required', { syncError: message });
     return { ...result, status: 'reauth_required', errors: [message] };
   }
 
   enableBankingStore.setStatus(connectionId, 'syncing');
-  const today = format(startedAt, 'yyyy-MM-dd');
+  const today = localDay(startedAt);
   const ownAccountsByIbanHash = enableBankingStore.ownAccountsByIbanHash();
   const bankAccounts = enableBankingStore.listAccounts(connectionId);
   // The connection's imported accounts and their currencies: exchanges happen within a bank
@@ -108,12 +97,8 @@ async function runSync(
 
   for (const bank of bankAccounts) {
     if (!bank.accountId || !bank.isEnabled || !bank.currency) continue;
-    const local = db
-      .select({ id: accounts.id, closedAt: accounts.closedAt })
-      .from(accounts)
-      .where(eq(accounts.id, bank.accountId))
-      .get();
-    if (!local || local.closedAt) continue;
+    const local = openAccount(bank.accountId);
+    if (!local) continue;
 
     const source = createEnableBankingDataSource(api, bank.accountUid, {
       psu,
@@ -133,20 +118,17 @@ async function runSync(
         remote,
         { ownAccountsByIbanHash, exchangePartners },
       );
-      result.added += imported.added;
-      result.matched += imported.matched;
-      result.transfers += imported.transfers;
-      result.recurring += imported.recurring;
+      result = addCounts(result, imported);
+      if (imported.otherCurrency > 0)
+        logError(
+          'Enable Banking sync',
+          `${imported.otherCurrency} transaction(s) in another currency skipped in ${bank.id}`,
+        );
 
       const balance = await source.fetchBalance();
       if (balance && balance.currency === bank.currency) {
-        if (bank.openingBalancePending) {
-          // Accounts created from the bank start where the bank says they are (D7)
-          db.update(accounts)
-            .set({ startingBalance: balance.amount - accountTransactionSum(local.id) })
-            .where(eq(accounts.id, local.id))
-            .run();
-        }
+        // Accounts created from the bank start where the bank says they are (D7)
+        if (bank.openingBalancePending) setBalanceTo(local.id, balance.amount);
         enableBankingStore.updateAccount(bank.id, {
           bankBalance: balance.amount,
           bankBalanceAt: new Date(now()).toISOString(),

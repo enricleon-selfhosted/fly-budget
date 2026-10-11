@@ -6,25 +6,23 @@ import { db } from '../db/index.js';
 import { accounts } from '../db/schema.js';
 import { currencyCode } from '../utils/currency.js';
 import { isoDate } from '../utils/validation.js';
-import { rateId } from '../services/fx/conversion.js';
 import {
   changeBudgetCurrency,
-  latestRate,
-  refreshFx,
+  latestRates,
+  removeManualRate,
+  setManualRate,
   waitingForRates,
 } from '../services/fx/fxService.js';
-import { deleteManualRate, recentRates, saveManualRate } from '../services/fx/ratesStore.js';
+import { recentRates } from '../services/fx/ratesStore.js';
 import { getBudgetSettings, saveBudgetSettings } from '../services/fx/settings.js';
-import type { DownloadResult } from '../services/fx/download.js';
+import {
+  downloadRates,
+  ratesDownloadAvailable,
+  scheduleRatesDownload,
+} from '../services/fx/download.js';
 
 // The budget's currency and the exchange rates of accounts in other currencies
-// (docs/multi-currency). `download` is the rates download; the demo passes null (M10).
-
-export type CurrenciesDeps = {
-  download: (() => Promise<DownloadResult>) | null;
-  /** Starts a download in the background, when downloading is on */
-  scheduleDownload: () => void;
-};
+// (docs/multi-currency). Where rates can't be downloaded (the demo, M10), turning it on is refused.
 
 const NOT_HERE = "Downloading rates isn't available in the demo. Enter them by hand.";
 
@@ -45,6 +43,7 @@ function overview() {
     .groupBy(accounts.currency)
     .all();
   const waiting = new Map(waitingForRates().map((w) => [w.currency, w.count]));
+  const latest = latestRates();
   return {
     budgetCurrency: settings.currency,
     downloadRates: settings.downloadRates,
@@ -53,13 +52,13 @@ function overview() {
     currencies: inUse.map((c) => ({
       code: c.code,
       accounts: c.accounts,
-      latest: latestRate(c.code, today),
+      latest: latest(c.code, today),
       waiting: waiting.get(c.code) ?? 0,
     })),
   };
 }
 
-export function createCurrenciesRouter(deps: CurrenciesDeps) {
+export function createCurrenciesRouter() {
   const router = Router();
 
   router.get('/', (_req, res) => res.json(overview()));
@@ -67,13 +66,16 @@ export function createCurrenciesRouter(deps: CurrenciesDeps) {
   router.put('/', (req, res) => {
     const parsed = settingsSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-    const { currency, downloadRates } = parsed.data;
-    if (downloadRates && !deps.download) return res.status(403).json({ error: NOT_HERE });
+    const { currency, downloadRates: downloading } = parsed.data;
+    if (downloading && !ratesDownloadAvailable()) return res.status(403).json({ error: NOT_HERE });
     if (currency) changeBudgetCurrency(currency);
-    if (downloadRates !== undefined) {
-      saveBudgetSettings({ downloadRates, ...(downloadRates ? {} : { ratesError: null }) });
+    if (downloading !== undefined) {
+      saveBudgetSettings({
+        downloadRates: downloading,
+        ...(downloading ? {} : { ratesError: null }),
+      });
     }
-    if (currency || downloadRates) deps.scheduleDownload();
+    if (currency || downloading) scheduleRatesDownload();
     res.json(overview());
   });
 
@@ -94,37 +96,28 @@ export function createCurrenciesRouter(deps: CurrenciesDeps) {
     if (!code.success || !date.success || !body.success) {
       return res.status(400).json({ error: 'Expected a currency, a date and a positive rate' });
     }
-    const budget = getBudgetSettings().currency;
-    if (!budget) return res.status(409).json({ error: 'Choose the budget’s currency first' });
-    if (code.data === budget) {
-      return res.status(400).json({ error: 'That’s the budget’s own currency' });
-    }
-    const row = saveManualRate(code.data, budget, date.data, body.data.rate);
-    refreshFx({ currency: code.data });
-    res.json(row);
+    const saved = setManualRate(code.data, date.data, body.data.rate);
+    if (!saved.ok) return res.status(saved.status).json({ error: saved.error });
+    res.json(saved.rate);
   });
 
   router.delete('/:code/rates/:date', (req, res) => {
     const code = currencyCode.safeParse(req.params.code);
     const date = isoDate.safeParse(req.params.date);
-    const budget = getBudgetSettings().currency;
-    if (!code.success || !date.success || !budget) {
-      return res.status(400).json({ error: 'Invalid request' });
-    }
-    const removed = deleteManualRate(rateId(code.data, budget, date.data));
-    if (!removed) return res.status(404).json({ error: 'No rate typed in for that date' });
-    refreshFx({ currency: code.data });
+    if (!code.success || !date.success) return res.status(400).json({ error: 'Invalid request' });
+    const removed = removeManualRate(code.data, date.data);
+    if (!removed.ok) return res.status(removed.status).json({ error: removed.error });
     res.status(204).send();
   });
 
   // Download missing rates now
   router.post('/download', async (_req, res, next) => {
-    if (!deps.download) return res.status(403).json({ error: NOT_HERE });
+    if (!ratesDownloadAvailable()) return res.status(403).json({ error: NOT_HERE });
     if (!getBudgetSettings().downloadRates) {
       return res.status(409).json({ error: 'Turn on downloading rates first' });
     }
     try {
-      const result = await deps.download();
+      const result = await downloadRates();
       res.json({ ...result, ...overview() });
     } catch (err) {
       next(err);

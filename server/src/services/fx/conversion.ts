@@ -85,6 +85,50 @@ export type FxInput = {
   lookup: (date: string) => number | null;
 };
 
+/**
+ * For one side of a transfer: the other side's amount when that side is in the budget's currency
+ * (an exchange, converted exactly), else null. `foreign` maps accounts in another currency to it.
+ */
+export function exchangeOtherAmount(
+  other: { accountId: string; amount: number } | undefined,
+  foreign: ReadonlyMap<string, string>,
+): number | null {
+  return other && !foreign.has(other.accountId) ? other.amount : null;
+}
+
+/** What decides whether a transaction's value in the budget currency can be typed in */
+export type BudgetAmountRow = {
+  amount: number;
+  /** In an account in another currency than the budget's */
+  inForeignAccount: boolean;
+  /** A split part: parts follow their parent's rate */
+  isSplitPart: boolean;
+  /** One side of an exchange whose other side is in the budget's currency: exact already */
+  exchangeIntoBudget: boolean;
+};
+
+/**
+ * Why `budgetAmount` can't be typed in as a transaction's value in the budget currency (M3), or
+ * null when it can. `null` goes back to the day's rate, which only split parts can't do.
+ */
+export function budgetAmountProblem(
+  row: BudgetAmountRow,
+  budgetAmount: number | null,
+): { status: 400; error: string } | null {
+  const refuse = (error: string) => ({ status: 400 as const, error });
+  if (!row.inForeignAccount) return refuse('This account is in the budget’s currency');
+  if (row.isSplitPart) return refuse('Split parts use the rate of the whole transaction');
+  if (budgetAmount === null) return null;
+  if (row.exchangeIntoBudget) return refuse('The amount comes from the exchange');
+  if (
+    impliedRate(row.amount, budgetAmount) === null ||
+    Math.sign(budgetAmount) !== Math.sign(row.amount)
+  ) {
+    return refuse('Enter an amount in the same direction as the transaction');
+  }
+  return null;
+}
+
 /** A transaction's rate, by the order of M3: typed in, exchange, then the day's rate */
 export function pickFxRate(input: FxInput): FxChoice {
   if (input.parent !== undefined) return input.parent;

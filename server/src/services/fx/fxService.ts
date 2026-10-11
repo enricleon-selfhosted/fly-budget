@@ -2,6 +2,9 @@ import { and, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import { accounts, transactions } from '../../db/schema.js';
 import {
+  budgetAmountProblem,
+  convertCents,
+  exchangeOtherAmount,
   impliedRate,
   latestRateOn,
   pickFxRate,
@@ -9,13 +12,14 @@ import {
   type DailyRate,
   type FxChoice,
 } from './conversion.js';
-import { pairRates } from './ratesStore.js';
+import { deleteManualRate, pairRates, saveManualRate } from './ratesStore.js';
 import { getBudgetSettings, saveBudgetSettings } from './settings.js';
 
 // The database side of converting transactions in accounts in another currency to the budget's
-// (docs/multi-currency M3). Every write that can change a transaction's account, date, amount,
-// transfer link or split calls convertTransactions; refreshFx('all') runs at startup and after a
-// restore, so anything missed is caught up.
+// (docs/multi-currency M3), of valuing their balances (M6) and of rates typed in (M4); the rules
+// themselves are pure, in conversion.ts. Every write that can change a transaction's account,
+// date, amount, transfer link or split calls convertTransactions; refreshFx('all') runs at startup
+// and after a restore, so anything missed is caught up.
 
 type Db = Pick<typeof db, 'select' | 'update'>;
 
@@ -100,6 +104,19 @@ function loadScope(tx: Db, scope: FxScope, foreign: Map<string, string>): FxRow[
   return [...byId.values()];
 }
 
+/** Each currency's rates to the budget's, read from the store once per currency */
+function ratesTo(budget: string): (currency: string) => DailyRate[] {
+  const cache = new Map<string, DailyRate[]>();
+  return (currency) => {
+    let rates = cache.get(currency);
+    if (!rates) {
+      rates = pairRates(currency, budget);
+      cache.set(currency, rates);
+    }
+    return rates;
+  };
+}
+
 const stored = (r: FxRow): FxChoice =>
   r.fxRate !== null && r.fxSource !== null
     ? { rate: r.fxRate, source: r.fxSource as NonNullable<FxChoice>['source'] }
@@ -129,11 +146,8 @@ export function refreshFx(scope: FxScope = 'all', opts: { resetManual?: boolean 
     }
     for (const r of selectWhere(tx, transactions.id, [...wanted])) outside.set(r.id, r);
 
-    const rateCache = new Map<string, DailyRate[]>();
-    const lookup = (currency: string) => (date: string) => {
-      if (!rateCache.has(currency)) rateCache.set(currency, pairRates(currency, budget));
-      return rateOn(rateCache.get(currency)!, date);
-    };
+    const rates = ratesTo(budget);
+    const lookup = (currency: string) => (date: string) => rateOn(rates(currency), date);
 
     const chosen = new Map<string, FxChoice>();
     const choose = (r: FxRow): FxChoice => {
@@ -158,13 +172,12 @@ export function refreshFx(scope: FxScope = 'all', opts: { resetManual?: boolean 
         } else {
           const otherId = r.transferTransactionId;
           const other = otherId ? (byId.get(otherId) ?? outside.get(otherId)) : undefined;
-          // An exchange into the budget's currency: exact (other sides in another currency use rates)
-          const exchangeOther = other && !foreign.has(other.accountId) ? other.amount : null;
           choice = pickFxRate({
             amount: r.amount,
             date: r.date,
             current,
-            exchangeOther,
+            // An exchange into the budget's currency is exact; other currencies use rates
+            exchangeOther: exchangeOtherAmount(other, foreign),
             lookup: lookup(currency),
           });
         }
@@ -205,60 +218,42 @@ export function waitsForRate(id: string): boolean {
   return !!row?.currency && row.fxRate === null;
 }
 
-export type FxOutcome = { ok: true } | { ok: false; status: number; error: string };
+/** How a write came out: done (with `T`), or refused with a status for the API */
+export type FxOutcome<T extends object = object> =
+  ({ ok: true } & T) | { ok: false; status: number; error: string };
 
-/**
- * Whether a transaction's value in the budget currency can be typed in: it's in an account in
- * another currency, not a split part (parts follow their parent), not an exchange into the
- * budget's currency (exact already), and in the same direction as its amount.
- */
-export function checkBudgetAmount(id: string, budgetAmount: number | null): FxOutcome {
+/** What decides whether a transaction's value in the budget currency can be typed in, now */
+function budgetAmountRow(id: string) {
   const row = db.select(fxColumns).from(transactions).where(eq(transactions.id, id)).get();
-  if (!row) return { ok: false, status: 404, error: 'Transaction not found' };
+  if (!row) return null;
   const foreign = foreignCurrencies();
-  if (!foreign.has(row.accountId)) {
-    return { ok: false, status: 400, error: 'This account is in the budget’s currency' };
-  }
-  if (row.parentTransactionId) {
-    return { ok: false, status: 400, error: 'Split parts use the rate of the whole transaction' };
-  }
-  if (budgetAmount === null) return { ok: true };
-  if (row.transferTransactionId) {
-    const other = db
-      .select({ accountId: transactions.accountId })
-      .from(transactions)
-      .where(eq(transactions.id, row.transferTransactionId))
-      .get();
-    if (other && !foreign.has(other.accountId)) {
-      return { ok: false, status: 400, error: 'The amount comes from the exchange' };
-    }
-  }
-  if (
-    impliedRate(row.amount, budgetAmount) === null ||
-    Math.sign(budgetAmount) !== Math.sign(row.amount)
-  ) {
-    return {
-      ok: false,
-      status: 400,
-      error: 'Enter an amount in the same direction as the transaction',
-    };
-  }
-  return { ok: true };
+  const other = row.transferTransactionId
+    ? selectWhere(db, transactions.id, [row.transferTransactionId])[0]
+    : undefined;
+  return {
+    amount: row.amount,
+    inForeignAccount: foreign.has(row.accountId),
+    isSplitPart: row.parentTransactionId !== null,
+    exchangeIntoBudget: exchangeOtherAmount(other, foreign) !== null,
+  };
 }
 
-/** Sets a transaction's value in the budget currency by hand; `null` goes back to the day's rate */
+/**
+ * Sets a transaction's value in the budget currency by hand; `null` goes back to the day's rate.
+ * Allowed when it's in an account in another currency, not a split part (parts follow their
+ * parent), not an exchange into the budget's currency (exact already), and in the same direction
+ * as its amount (budgetAmountProblem). Checked against the transaction as it is now: a request
+ * that also changes the amount updates the row first.
+ */
 export function setBudgetAmount(id: string, budgetAmount: number | null): FxOutcome {
-  const problem = checkBudgetAmount(id, budgetAmount);
-  if (!problem.ok) return problem;
-  const amount = db
-    .select({ amount: transactions.amount })
-    .from(transactions)
-    .where(eq(transactions.id, id))
-    .get()!.amount;
+  const row = budgetAmountRow(id);
+  if (!row) return { ok: false, status: 404, error: 'Transaction not found' };
+  const problem = budgetAmountProblem(row, budgetAmount);
+  if (problem) return { ok: false, ...problem };
   const set =
     budgetAmount === null
       ? { fxRate: null, fxSource: null }
-      : { fxRate: impliedRate(amount, budgetAmount), fxSource: 'manual' };
+      : { fxRate: impliedRate(row.amount, budgetAmount), fxSource: 'manual' };
   db.update(transactions).set(set).where(eq(transactions.id, id)).run();
   refreshFx({ transactionIds: [id] });
   return { ok: true };
@@ -292,11 +287,70 @@ export function changeBudgetCurrency(next: string): { accountsChanged: number } 
   return { accountsChanged };
 }
 
-/** A currency's latest rate to the budget's on or before `date` (any age), null when none */
-export function latestRate(currency: string, date: string) {
+export type LatestRate = { rate: number; date: string };
+
+/**
+ * Finds currencies' latest rates to the budget's on or before a date, however old (M6), null
+ * when there's none. Reads the budget currency once and each pair once: use one per request.
+ */
+export function latestRates(): (currency: string, date: string) => LatestRate | null {
   const budget = getBudgetSettings().currency;
-  if (!budget) return null;
-  return latestRateOn(pairRates(currency, budget), date);
+  if (!budget) return () => null;
+  const rates = ratesTo(budget);
+  return (currency, date) => latestRateOn(rates(currency), date);
+}
+
+/** A currency's latest rate to the budget's on or before `date` (any age), null when none */
+export function latestRate(currency: string, date: string): LatestRate | null {
+  return latestRates()(currency, date);
+}
+
+/**
+ * Values balances of accounts in another currency in the budget's (M6): at the latest rate on or
+ * before the date, however old, with that rate's date; null without one (the balance is then left
+ * out of totals). Each pair's rates are read once: use one per request.
+ */
+export function balanceValuer(): (
+  currency: string,
+  balance: number,
+  date: string,
+) => { value: number; asOf: string } | null {
+  const latest = latestRates();
+  return (currency, balance, date) => {
+    const rate = latest(currency, date);
+    return rate ? { value: convertCents(balance, rate.rate), asOf: rate.date } : null;
+  };
+}
+
+/** A rate typed in, as stored */
+export type ManualRate = ReturnType<typeof saveManualRate>;
+
+/**
+ * Types in `code`'s rate to the budget's currency for a date (M4): it applies until the next
+ * rate, and the transactions it now covers are converted again.
+ */
+export function setManualRate(
+  code: string,
+  date: string,
+  rate: number,
+): FxOutcome<{ rate: ManualRate }> {
+  const budget = getBudgetSettings().currency;
+  if (!budget) return { ok: false, status: 409, error: 'Choose the budget’s currency first' };
+  if (code === budget) return { ok: false, status: 400, error: 'That’s the budget’s own currency' };
+  const row = saveManualRate(code, budget, date, rate);
+  refreshFx({ currency: code });
+  return { ok: true, rate: row };
+}
+
+/** Removes the rate typed in for a date and converts again what it covered */
+export function removeManualRate(code: string, date: string): FxOutcome {
+  const budget = getBudgetSettings().currency;
+  if (!budget) return { ok: false, status: 400, error: 'Invalid request' };
+  if (!deleteManualRate(code, budget, date)) {
+    return { ok: false, status: 404, error: 'No rate typed in for that date' };
+  }
+  refreshFx({ currency: code });
+  return { ok: true };
 }
 
 /** Transactions in accounts in another currency that have no rate yet, by currency */

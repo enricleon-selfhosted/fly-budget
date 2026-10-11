@@ -1,10 +1,8 @@
 import { createHash } from 'crypto';
-import { eq } from 'drizzle-orm';
-import { db } from '../../db/index.js';
-import { accounts } from '../../db/schema.js';
 import { logError } from '../../utils/log.js';
-import { accountTransactionSum } from '../balances.js';
-import { applyMappings, type MappingRequest } from './accountMapping.js';
+import { accountSummary } from '../accountService.js';
+import { budgetCurrency as storedBudgetCurrency } from '../fx/settings.js';
+import { applyMappings } from './accountMapping.js';
 import { createEnableBankingClient, type EnableBankingApi, type PsuHeaders } from './client.js';
 import {
   disconnect,
@@ -24,19 +22,22 @@ import {
 } from './errors.js';
 import { parsePrivateKey } from './jwt.js';
 import { suggestAccountType } from './mapping.js';
+import { localDay, type MappingRequest } from './rules.js';
 import type { EbAspsp } from './schemas.js';
 import { enableBankingStore, type BankAccountRow, type StoredConfig } from './store.js';
-import { syncConnection, type SyncResult } from './syncService.js';
+import { emptySyncResult, syncConnection, type SyncResult } from './syncService.js';
 
 // Everything the routes can do with Enable Banking, wired from the single-purpose modules.
-// The API client and the clock are injected, so routes and services are tested against a
-// fake Enable Banking without mocking modules.
+// The API client, the clock and the budget's currency are injected, so routes and services are
+// tested against a fake Enable Banking without mocking modules.
 
 const BANK_LIST_TTL_MS = 60 * 60 * 1000;
 
 export type EnableBankingServiceDeps = {
   makeApi?: (config: Pick<StoredConfig, 'applicationId' | 'privateKey'>) => EnableBankingApi;
   now?: () => number;
+  /** The budget's currency, stored on the server (docs/multi-currency M2); null until set */
+  budgetCurrency?: () => string | null;
 };
 
 export type AccountView = {
@@ -58,13 +59,7 @@ export type AccountView = {
 export type ConsentView = ConsentStatus<ConsentResult & { accounts: AccountView[] }>;
 
 function accountView(row: BankAccountRow): AccountView {
-  const local = row.accountId
-    ? db
-        .select({ name: accounts.name, startingBalance: accounts.startingBalance })
-        .from(accounts)
-        .where(eq(accounts.id, row.accountId))
-        .get()
-    : undefined;
+  const local = row.accountId ? accountSummary(row.accountId) : null;
   return {
     id: row.id,
     name: row.name,
@@ -78,12 +73,13 @@ function accountView(row: BankAccountRow): AccountView {
     syncFrom: row.syncFrom,
     bankBalance: row.bankBalance,
     bankBalanceAt: row.bankBalanceAt,
-    balance: local ? local.startingBalance + accountTransactionSum(row.accountId!) : null,
+    balance: local?.balance ?? null,
   };
 }
 
 export function createEnableBankingService(deps: EnableBankingServiceDeps = {}) {
   const now = deps.now ?? Date.now;
+  const budgetCurrency = deps.budgetCurrency ?? storedBudgetCurrency;
   const makeApi =
     deps.makeApi ??
     ((config: Pick<StoredConfig, 'applicationId' | 'privateKey'>) =>
@@ -127,7 +123,7 @@ export function createEnableBankingService(deps: EnableBankingServiceDeps = {}) 
     };
   }
 
-  const finish = (info: ConsentInfo, code: string) => finishConsent(info, code, api());
+  const finish = (info: ConsentInfo, code: string) => finishConsent(info, code, api(), now);
   const consentError = (err: unknown) => {
     logError('Enable Banking consent', err);
     return enableBankingErrorMessage(err, 'Connecting to your bank failed. Try again.');
@@ -166,12 +162,15 @@ export function createEnableBankingService(deps: EnableBankingServiceDeps = {}) 
         throw new ConfigurationError(
           'This redirect URL isn’t registered in your Enable Banking application. Add it there, or use one that is.',
         );
-      enableBankingStore.saveConfig({
-        applicationId: input.applicationId,
-        privateKey,
-        redirectUrl: input.redirectUrl,
-        environment: app.environment,
-      });
+      enableBankingStore.saveConfig(
+        {
+          applicationId: input.applicationId,
+          privateKey,
+          redirectUrl: input.redirectUrl,
+          environment: app.environment,
+        },
+        new Date(now()).toISOString(),
+      );
       bankLists.clear();
       cached = undefined;
     },
@@ -225,15 +224,22 @@ export function createEnableBankingService(deps: EnableBankingServiceDeps = {}) 
     async completeFromAddress(id: string, address: string): Promise<ConsentView> {
       const { code, state, error } = parseRedirect(address);
       if (!state) throw new ConfigurationError('That isn’t the address your bank sent you to.');
+      const otherAttempt = () =>
+        new ConfigurationError(
+          'That address is from another or an expired attempt. Start connecting again.',
+        );
       if (error || !code) {
-        consents.fail(state, 'The bank didn’t give access. Try connecting again.');
+        const failed = consents.fail(
+          state,
+          'The bank didn’t give access. Try connecting again.',
+          id,
+        );
+        // Not failed but finished already (the same address twice): that outcome stands
+        if (!failed && consents.status(id).status === 'pending') throw otherAttempt();
         return consentView(consents.status(id));
       }
       const outcome = consents.complete(state, (info) => finish(info, code), consentError, id);
-      if (!outcome)
-        throw new ConfigurationError(
-          'That address is from another or an expired attempt. Start connecting again.',
-        );
+      if (!outcome) throw otherAttempt();
       await outcome;
       return consentView(consents.status(id));
     },
@@ -262,11 +268,13 @@ export function createEnableBankingService(deps: EnableBankingServiceDeps = {}) 
       }));
     },
 
-    mapAccounts(connectionId: string, budgetCurrency: string, requests: MappingRequest[]) {
+    /** The budget's currency decides which accounts are in another currency (M2) */
+    mapAccounts(connectionId: string, requests: MappingRequest[]) {
       if (!enableBankingStore.getConnection(connectionId))
         throw new NotFoundError('That connection doesn’t exist anymore.');
-      const today = new Date(now()).toISOString().slice(0, 10);
-      return applyMappings(connectionId, requests, budgetCurrency, today);
+      const currency = budgetCurrency();
+      if (!currency) throw new ConflictError('Choose the budget’s currency first.');
+      return applyMappings(connectionId, requests, currency, localDay(now()));
     },
 
     sync(connectionId: string, psu?: PsuHeaders): Promise<SyncResult> {
@@ -285,13 +293,7 @@ export function createEnableBankingService(deps: EnableBankingServiceDeps = {}) 
         } catch (err) {
           logError('Enable Banking sync', err);
           results.push({
-            connectionId: c.id,
-            aspspName: c.aspspName,
-            added: 0,
-            matched: 0,
-            transfers: 0,
-            recurring: 0,
-            status: 'error',
+            ...emptySyncResult(c, 'error'),
             errors: [enableBankingErrorMessage(err, 'Sync failed.')],
           });
         }

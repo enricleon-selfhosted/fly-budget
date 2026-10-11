@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import {
-  amountScore,
+  amountFit,
   pickImportMatches,
   scoreMatch,
   textMatches,
@@ -35,23 +35,41 @@ const tx = (over: Partial<ImportedTransaction> = {}): ImportedTransaction => ({
   ...over,
 });
 
-describe('amountScore', () => {
+describe('amountFit', () => {
+  const amountTypes = ['exact', 'approximate', 'variable'] as const;
+  // Expected amounts of either direction, and any amount
+  const pair = fc
+    .tuple(
+      fc.integer({ min: 1, max: 1e7 }),
+      fc.integer({ min: -1e7, max: 1e7 }),
+      fc.constantFrom(1, -1),
+    )
+    .map(([expected, amount, sign]) => ({ expected: expected * sign, amount: amount * sign }));
+
   it('exact needs the exact amount, approximate within 10%, variable any amount in the same direction', () => {
     fc.assert(
-      fc.property(
-        fc.integer({ min: 1, max: 1e7 }),
-        fc.integer({ min: -1e7, max: 1e7 }),
-        (expected, amount) => {
-          const exact = amountScore('exact', amount, expected);
-          const approx = amountScore('approximate', amount, expected);
-          const variable = amountScore('variable', amount, expected);
-          expect(exact > 0).toBe(amount === expected);
-          expect(approx > 0).toBe(amount > 0 && Math.abs(amount - expected) / expected <= 0.1);
-          expect(variable > 0).toBe(amount > 0);
-          // Closer never scores lower
-          expect(variable).toBeGreaterThanOrEqual(amount === expected ? 30 : 0);
-        },
-      ),
+      fc.property(pair, ({ expected, amount }) => {
+        const off = Math.abs(amount - expected) / Math.abs(expected);
+        const sameDirection = Math.sign(amount) === Math.sign(expected);
+        expect(amountFit('exact', amount, expected) !== null).toBe(amount === expected);
+        expect(amountFit('approximate', amount, expected) !== null).toBe(
+          sameDirection && off <= 0.1,
+        );
+        expect(amountFit('variable', amount, expected) !== null).toBe(sameDirection);
+      }),
+    );
+  });
+
+  it('the expected amount is exact for every type; only a variable amount more than 25% off is loose', () => {
+    fc.assert(
+      fc.property(pair, fc.constantFrom(...amountTypes), ({ expected, amount }, type) => {
+        const fit = amountFit(type, amount, expected);
+        const off = Math.abs(amount - expected) / Math.abs(expected);
+        if (amount === expected) expect(fit).toBe('exact');
+        expect(fit === 'loose').toBe(
+          type === 'variable' && Math.sign(amount) === Math.sign(expected) && off > 0.25,
+        );
+      }),
     );
   });
 });
@@ -84,6 +102,47 @@ describe('scoreMatch', () => {
     expect(scoreMatch(stranger, occ, schedule()).score).toBe(0);
     // Within 25% it can still be suggested on the date and account alone
     expect(scoreMatch({ ...stranger, amount: 55_000 }, occ, schedule()).score).toBeGreaterThan(0);
+  });
+
+  it('a loose amount needs the payee or bank text to count; an exact or close one does not', () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom('exact', 'approximate', 'variable'),
+        fc.integer({ min: -200_000, max: 200_000 }),
+        fc.boolean(),
+        (amountType, amount, recognized) => {
+          const t = recognized
+            ? tx({ amount })
+            : tx({ amount, importedPayee: 'REFUND', payeeName: 'Shop' });
+          const result = scoreMatch(
+            t,
+            { expectedDate: day(0), expectedAmount: 60_000 },
+            schedule({ amountType }),
+          );
+          const fit = amountFit(amountType, amount, 60_000);
+          expect(result.score > 0).toBe(fit !== null && (recognized || fit !== 'loose'));
+          expect(result.payeeScore > 0).toBe(result.score > 0 && recognized);
+        },
+      ),
+    );
+  });
+
+  it('a closer amount never scores lower', () => {
+    const rank = { exact: 3, close: 2, loose: 1 };
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 1, max: 200_000 }),
+        fc.integer({ min: 1, max: 200_000 }),
+        (a, b) => {
+          const occ = { expectedDate: day(0), expectedAmount: 60_000 };
+          const [fitA, fitB] = [a, b].map((amount) => amountFit('variable', amount, 60_000)!);
+          const [scoreA, scoreB] = [a, b].map(
+            (amount) => scoreMatch(tx({ amount }), occ, schedule()).score,
+          );
+          if (rank[fitA] >= rank[fitB]) expect(scoreA).toBeGreaterThanOrEqual(scoreB);
+        },
+      ),
+    );
   });
 
   it('never matches outside the date flexibility or in the other direction', () => {

@@ -15,9 +15,14 @@ import {
 } from '../db/schema.js';
 import { apiTokenGuard, hostGuard, originGuard } from '../middleware/security.js';
 import type { EnableBankingApi, StartAuthorization } from '../services/enableBanking/client.js';
-import { EnableBankingError, ReauthRequiredError } from '../services/enableBanking/errors.js';
+import {
+  ConflictError,
+  EnableBankingError,
+  ReauthRequiredError,
+} from '../services/enableBanking/errors.js';
 import { ibanHash } from '../services/enableBanking/mapping.js';
 import { createEnableBankingService } from '../services/enableBanking/service.js';
+import { saveBudgetSettings } from '../services/fx/settings.js';
 import { accountsRouter } from './accounts.js';
 import {
   ENABLE_BANKING_CALLBACK_PATH,
@@ -135,6 +140,8 @@ let base: string;
 
 beforeAll(async () => {
   migrate(db, { migrationsFolder: 'src/db/migrations' });
+  // The budget's currency is the server's (docs/multi-currency M2)
+  saveBudgetSettings({ currency: 'EUR' });
   const service = createEnableBankingService({ makeApi: () => api, now: () => now });
   const app = express();
   app.use(express.json());
@@ -442,7 +449,6 @@ describe('choosing accounts and syncing', () => {
       type: 'savings',
     });
     const res = await call('PUT', `/api/enablebanking/connections/${connection().id}/accounts`, {
-      budgetCurrency: 'EUR',
       accounts: [
         {
           id: bankAccount('h-chk').id,
@@ -459,7 +465,6 @@ describe('choosing accounts and syncing', () => {
     expect(res.body.errors).toHaveLength(1);
 
     const usd = await call('PUT', `/api/enablebanking/connections/${connection().id}/accounts`, {
-      budgetCurrency: 'EUR',
       accounts: [{ id: bankAccount('h-usd').id, action: 'create' }],
     });
     expect(usd.body.created).toBe(1);
@@ -573,13 +578,37 @@ describe('choosing accounts and syncing', () => {
         .length;
     const kept = count();
     await call('PUT', `/api/enablebanking/connections/${connection().id}/accounts`, {
-      budgetCurrency: 'EUR',
       accounts: [{ id: checking.id, action: 'skip' }],
     });
     expect(bankAccount('h-chk')).toMatchObject({ isEnabled: 0, accountId: null });
     expect(
       db.select().from(transactions).where(eq(transactions.accountId, checking.accountId!)).all(),
     ).toHaveLength(kept);
+  });
+
+  it('decides currencies by the budget’s on the server, whatever an older client sends', async () => {
+    // A stale client still sends the currency it last knew
+    const res = await call('PUT', `/api/enablebanking/connections/${connection().id}/accounts`, {
+      budgetCurrency: 'USD',
+      accounts: [{ id: bankAccount('h-chk').id, action: 'create', accountName: 'BBVA again' }],
+    });
+    expect(res.body).toMatchObject({ created: 1, errors: [] });
+    const created = db
+      .select()
+      .from(accounts)
+      .where(eq(accounts.id, bankAccount('h-chk').accountId!))
+      .get()!;
+    // A EUR account in a EUR budget is in the budget's currency, not a foreign one
+    expect(created).toMatchObject({ name: 'BBVA again', currency: null, isOffBudget: 0 });
+  });
+
+  it('refuses to choose accounts before the budget has a currency', () => {
+    const service = createEnableBankingService({
+      makeApi: () => api,
+      now: () => now,
+      budgetCurrency: () => null,
+    });
+    expect(() => service.mapAccounts(connection().id, [])).toThrow(ConflictError);
   });
 });
 

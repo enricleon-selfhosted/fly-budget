@@ -36,9 +36,11 @@ export interface ImportStore {
   insert(input: NewImport): string;
   /** Date and amount of a transaction that could still become one side of a transfer */
   linkable(transactionId: string): { date: string; amount: number } | null;
+  /** The account's stored currency (null = the budget's), to pair transfers within a currency */
+  storedCurrency(accountId: string): string | null;
   /**
-   * Imported transactions in the user's other open accounts with the same currency as this
-   * account, of the opposite amount around this date, that could be the other side of a transfer
+   * Imported transactions in the user's other open accounts, in any currency (matching.ts
+   * decides), of the opposite amount around this date, that could be the other side of a transfer
    */
   transferCandidates(
     accountId: string,
@@ -154,17 +156,22 @@ export function createSqliteImportStore(): ImportStore {
       );
     },
 
+    storedCurrency(accountId) {
+      return (
+        db
+          .select({ currency: accounts.currency })
+          .from(accounts)
+          .where(eq(accounts.id, accountId))
+          .get()?.currency ?? null
+      );
+    },
+
     transferCandidates(accountId, amount, date, days) {
-      const own = db
-        .select({ currency: accounts.currency })
-        .from(accounts)
-        .where(eq(accounts.id, accountId))
-        .get();
-      if (!own) return [];
       return db
         .select({
           id: transactions.id,
           accountId: transactions.accountId,
+          currency: accounts.currency,
           date: transactions.date,
           amount: transactions.amount,
         })
@@ -174,8 +181,6 @@ export function createSqliteImportStore(): ImportStore {
           and(
             ne(transactions.accountId, accountId),
             isNull(accounts.closedAt),
-            // Same currency: both the budget's (null), or the same code
-            sql`${accounts.currency} is ${own.currency}`,
             eq(transactions.amount, -amount),
             isNotNull(transactions.importedId),
             plain,

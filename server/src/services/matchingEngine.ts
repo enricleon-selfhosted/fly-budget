@@ -8,7 +8,7 @@ import {
 import { eq, and, gte, lte, isNull, inArray } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { format, parseISO, addDays, subDays } from 'date-fns';
-import { pickImportMatches, scoreMatch } from './scheduleMatching.js';
+import { MAX_DATE_FLEXIBILITY, pickImportMatches, scoreMatch } from './scheduleMatching.js';
 
 export function linkOccurrenceToTransaction(
   occurrenceId: string,
@@ -154,8 +154,9 @@ export function getMatchSuggestions(): MatchSuggestion[] {
     const candidateTxns: MatchSuggestion['candidates'] = [];
 
     for (const tx of nearbyTxns) {
-      if (schedule.amount < 0 && tx.amount > 0) continue;
-      if (schedule.amount > 0 && tx.amount < 0) continue;
+      // The score decides everything about the fit, direction included (scoreMatch)
+      const { score } = scoreMatch(tx, occ, schedule);
+      if (score < 40) continue;
 
       const dismissed = db
         .select()
@@ -169,17 +170,14 @@ export function getMatchSuggestions(): MatchSuggestion[] {
         .get();
       if (dismissed) continue;
 
-      const { score } = scoreMatch(tx, occ, schedule);
-      if (score >= 40) {
-        candidateTxns.push({
-          transactionId: tx.id,
-          accountId: tx.accountId,
-          date: tx.date,
-          amount: tx.amount,
-          payeeName: tx.payeeName,
-          score,
-        });
-      }
+      candidateTxns.push({
+        transactionId: tx.id,
+        accountId: tx.accountId,
+        date: tx.date,
+        amount: tx.amount,
+        payeeName: tx.payeeName,
+        score,
+      });
     }
 
     if (candidateTxns.length > 0) {
@@ -234,9 +232,9 @@ export function autoMatchImported(transactionIds: readonly string[]): number {
     .all();
   if (!txs.length) return 0;
   const dates = txs.map((t) => t.date).sort();
-  // The widest date flexibility allowed is 14 days
-  const from = format(subDays(parseISO(dates[0]), 14), 'yyyy-MM-dd');
-  const to = format(addDays(parseISO(dates[dates.length - 1]), 14), 'yyyy-MM-dd');
+  // Any item's date flexibility is within this window
+  const from = format(subDays(parseISO(dates[0]), MAX_DATE_FLEXIBILITY), 'yyyy-MM-dd');
+  const to = format(addDays(parseISO(dates[dates.length - 1]), MAX_DATE_FLEXIBILITY), 'yyyy-MM-dd');
   const accountIds = [...new Set(txs.map((t) => t.accountId))];
 
   const pending = db

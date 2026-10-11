@@ -4,13 +4,20 @@ import { CONSENT_TTL_MS, createConsentRegistry } from './consent.js';
 const message = (err: unknown) => (err as Error).message;
 
 describe('consent registry', () => {
-  it('gives the UI an id and the bank a different, unguessable state', () => {
+  it('gives the UI an id and the bank a different, unguessable state', async () => {
     const registry = createConsentRegistry<{ bank: string }, string>();
     const { id, state } = registry.begin({ bank: 'BBVA' });
     expect(state).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(id).not.toBe(state);
     expect(registry.status(id)).toEqual({ status: 'pending' });
-    expect(registry.info(id)).toEqual({ bank: 'BBVA' });
+    // Finishing gets the details the consent began with
+    let seen: { bank: string } | undefined;
+    const finish = async (info: { bank: string }) => {
+      seen = info;
+      return 'connection-1';
+    };
+    await registry.complete(state, finish, message);
+    expect(seen).toEqual({ bank: 'BBVA' });
   });
 
   it('finishes exactly once even when the callback and a pasted address arrive together', async () => {
@@ -81,5 +88,20 @@ describe('consent registry', () => {
     registry.cancel(other.id);
     expect(registry.status(other.id)).toEqual({ status: 'expired' });
     expect(registry.complete(other.state, async () => 'x', message)).toBeUndefined();
+  });
+
+  it('ignores an error address pasted for another consent, leaving both waiting', async () => {
+    const registry = createConsentRegistry<null, string>();
+    const a = registry.begin(null);
+    const b = registry.begin(null);
+    expect(registry.fail(a.state, 'You cancelled at your bank.', b.id)).toBe(false);
+    expect(registry.status(a.id)).toEqual({ status: 'pending' });
+    expect(registry.status(b.id)).toEqual({ status: 'pending' });
+    // Both can still finish
+    expect(await registry.complete(a.state, async () => 'x', message, a.id)).toEqual({
+      status: 'complete',
+      result: 'x',
+    });
+    expect(registry.fail(b.state, 'You cancelled at your bank.', b.id)).toBe(true);
   });
 });

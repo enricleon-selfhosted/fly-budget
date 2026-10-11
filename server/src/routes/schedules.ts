@@ -20,7 +20,8 @@ import {
   dismissMatchSuggestion,
   getMatchSuggestions,
 } from '../services/matchingEngine.js';
-import { convertTransactions } from '../services/fx/fxService.js';
+import { afterTransactionsWritten } from '../services/transactionFx.js';
+import { MAX_DATE_FLEXIBILITY } from '../services/scheduleMatching.js';
 
 export const schedulesRouter = Router();
 
@@ -75,7 +76,7 @@ const scheduleFields = {
   startDate: isoDate,
   endDate: isoDate.nullable().optional(),
   weekendAdjust: weekendAdjustEnum,
-  dateFlexibility: z.number().int().min(0).max(14),
+  dateFlexibility: z.number().int().min(0).max(MAX_DATE_FLEXIBILITY),
   accountId: id.nullable().optional(),
   transferAccountId: id.nullable().optional(),
   categoryId: id.nullable().optional(),
@@ -512,7 +513,7 @@ schedulesRouter.post('/:id/mark-paid', (req, res) => {
   };
 
   db.insert(transactions).values(tx).run();
-  convertTransactions([txId]);
+  afterTransactionsWritten([txId]);
   linkOccurrenceToTransaction(occId, txId, 'manual', 100);
 
   res.status(201).json(tx);

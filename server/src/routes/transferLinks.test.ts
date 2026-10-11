@@ -51,13 +51,13 @@ async function twoAccounts() {
   return { checking, savings };
 }
 
-function imported(accountId: string, amount: number, payee: string) {
+function imported(accountId: string, amount: number, payee: string, date = '2096-03-10') {
   const id = `t-${Math.random().toString(36).slice(2)}`;
   db.insert(transactions)
     .values({
       id,
       accountId,
-      date: '2096-03-10',
+      date,
       amount,
       payeeName: payee,
       importedPayee: payee,
@@ -93,17 +93,22 @@ describe('linkTransfer', () => {
     const a = imported(checking.id, -500, 'A');
     expect(linkTransfer(a, imported(savings.id, 400, 'B'))).toMatchObject({
       ok: false,
-      status: 400,
+      reason: 'invalid_pair',
     });
     expect(linkTransfer(a, imported(checking.id, 500, 'C'))).toMatchObject({
       ok: false,
-      status: 400,
+      reason: 'invalid_pair',
     });
-    expect(linkTransfer(a, 'missing')).toMatchObject({ ok: false, status: 404 });
+    expect(linkTransfer(a, 'missing')).toMatchObject({ ok: false, reason: 'not_found' });
 
     const reconciled = imported(savings.id, 500, 'D');
     db.update(transactions).set({ reconciled: 1 }).where(eq(transactions.id, reconciled)).run();
-    expect(linkTransfer(a, reconciled)).toMatchObject({ ok: false, status: 403 });
+    expect(linkTransfer(a, reconciled)).toMatchObject({ ok: false, reason: 'reconciled' });
+    // The API answers each reason with its status
+    const status = async (otherId: string) =>
+      (await send('POST', `/transactions/${a}/link-transfer`, { otherId })).status;
+    expect(await status('missing')).toBe(404);
+    expect(await status(reconciled)).toBe(403);
     // Nothing changed on the first one
     expect(row(a).transferTransactionId).toBeNull();
   });
@@ -114,7 +119,10 @@ describe('linkTransfer', () => {
     const b = imported(savings.id, 700, 'B');
     linkTransfer(a, b);
     const c = imported(savings.id, 700, 'C');
-    expect(linkTransfer(a, c)).toMatchObject({ ok: false, status: 400 });
+    expect(linkTransfer(a, c)).toMatchObject({ ok: false, reason: 'not_plain' });
+    expect((await send('POST', `/transactions/${a}/link-transfer`, { otherId: c })).status).toBe(
+      400,
+    );
   });
 });
 
@@ -207,6 +215,52 @@ describe('exchanges and transfers across the budget boundary', () => {
 
     const flipped = await send('PUT', `/transactions/${pair[1].id}`, { amount: -11_650 });
     expect(flipped.status).toBe(400);
+    expect(flipped.body.error).toBe(
+      'A transfer takes money out of one account and puts it into the other',
+    );
+    expect(row(pair[1].id).amount).toBe(11_650);
+  });
+
+  it('an edit can never leave a transfer moving nothing', async () => {
+    const { checking, savings } = await twoAccounts();
+    const { body: pair } = await send('POST', '/transactions/transfer', {
+      fromAccountId: checking.id,
+      toAccountId: savings.id,
+      date: '2096-03-12',
+      amount: 1_000,
+    });
+    const zero = await send('PUT', `/transactions/${pair[0].id}`, {
+      amount: 0,
+      date: '2096-03-14',
+    });
+    expect(zero.status).toBe(400);
+    expect(zero.body.error).toBe(
+      'A transfer takes money out of one account and puts it into the other',
+    );
+    // Nothing changed on either side, not even the date sent with it
+    expect(row(pair[0].id)).toMatchObject({ amount: -1_000, date: '2096-03-12' });
+    expect(row(pair[1].id)).toMatchObject({ amount: 1_000, date: '2096-03-12' });
+
+    // Changing direction moves both sides
+    expect((await send('PUT', `/transactions/${pair[0].id}`, { amount: 300 })).status).toBe(200);
+    expect(row(pair[1].id).amount).toBe(-300);
+  });
+
+  it('a side of a transfer stays in its account', async () => {
+    const { checking, savings } = await twoAccounts();
+    const { body: third } = await send('POST', '/accounts', { name: 'Third', type: 'checking' });
+    const { body: pair } = await send('POST', '/transactions/transfer', {
+      fromAccountId: checking.id,
+      toAccountId: savings.id,
+      date: '2096-03-12',
+      amount: 1_000,
+    });
+    const moved = await send('PUT', `/transactions/${pair[1].id}`, { accountId: third.id });
+    expect(moved).toMatchObject({
+      status: 400,
+      body: { error: 'Transfers stay in their accounts' },
+    });
+    expect(row(pair[1].id).accountId).toBe(savings.id);
   });
 
   it('the budget side of money coming from an off-budget account can be income', async () => {
@@ -311,8 +365,49 @@ describe('what the app needs to show and link transfers', () => {
     imported(savings.id, -5_000, 'SAME DIRECTION');
     const exchange = imported(gbp.id, 4_310, 'FROM EUR');
 
+    // Rows that can't be linked are never offered
+    const reconciled = imported(savings.id, 5_000, 'RECONCILED');
+    db.update(transactions).set({ reconciled: 1 }).where(eq(transactions.id, reconciled)).run();
+
     const { body } = await send('GET', `/transactions/${out}/transfer-candidates`);
     expect(body.map((c: { id: string }) => c.id).sort()).toEqual([exact, exchange].sort());
-    expect(body.find((c: { id: string }) => c.id === exchange)).toMatchObject({ currency: 'GBP' });
+    expect(body.find((c: { id: string }) => c.id === exchange)).toEqual({
+      id: exchange,
+      accountId: gbp.id,
+      accountName: 'GBP spare',
+      currency: 'GBP',
+      date: '2096-03-10',
+      amount: 4_310,
+      payeeName: 'FROM EUR',
+    });
+    expect((await send('GET', '/transactions/missing/transfer-candidates')).status).toBe(404);
+  });
+
+  it('offers nothing for a transaction that could not be linked itself', async () => {
+    // Its own dates, away from the other tests' transactions
+    const date = '2096-08-20';
+    const { checking, savings } = await twoAccounts();
+    imported(savings.id, 1_000, 'COULD BE THE OTHER SIDE', date);
+    const { body: split } = await send('POST', '/transactions', {
+      accountId: checking.id,
+      date,
+      amount: -1_000,
+      splits: [
+        { categoryId: null, amount: -600 },
+        { categoryId: null, amount: -400 },
+      ],
+    });
+    const part = split.children[0].id;
+    const reconciled = imported(checking.id, -1_000, 'RECONCILED', date);
+    db.update(transactions).set({ reconciled: 1 }).where(eq(transactions.id, reconciled)).run();
+
+    for (const id of [split.id, part, reconciled]) {
+      const { status, body } = await send('GET', `/transactions/${id}/transfer-candidates`);
+      expect(status).toBe(200);
+      expect(body).toEqual([]);
+    }
+    // A plain one in the same account would be offered it
+    const plain = imported(checking.id, -1_000, 'PLAIN', date);
+    expect((await send('GET', `/transactions/${plain}/transfer-candidates`)).body).toHaveLength(1);
   });
 });

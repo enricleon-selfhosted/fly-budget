@@ -7,6 +7,7 @@ import { db } from '../db/index.js';
 import { categories, categoryGroups } from '../db/schema.js';
 import { accountsRouter } from './accounts.js';
 import { budgetRouter } from './budget.js';
+import { exportRouter } from './export.js';
 import { reportsRouter } from './reports.js';
 import { transactionsRouter } from './transactions.js';
 import { createCurrenciesRouter } from './currencies.js';
@@ -45,19 +46,16 @@ beforeAll(async () => {
   migrate(db, { migrationsFolder: 'src/db/migrations' });
   configureRatesDownload({ fetch: fakeFrankfurter, today: () => '2026-10-09' });
   const app = express();
-  app.use(express.json());
+  // Restores parse their own (bigger) body, like in index.ts
+  app.use((req, res, next) =>
+    req.path === '/api/export/restore' ? next() : express.json()(req, res, next),
+  );
   app.use('/api/accounts', accountsRouter);
   app.use('/api/budget', budgetRouter);
+  app.use('/api/export', exportRouter);
   app.use('/api/reports', reportsRouter);
   app.use('/api/transactions', transactionsRouter);
-  app.use(
-    '/api/currencies',
-    createCurrenciesRouter({ download: downloadRates, scheduleDownload: () => {} }),
-  );
-  app.use(
-    '/api/demo-currencies',
-    createCurrenciesRouter({ download: null, scheduleDownload: () => {} }),
-  );
+  app.use('/api/currencies', createCurrenciesRouter());
   server = await new Promise<Server>((r) => {
     const s = app.listen(0, '127.0.0.1', () => r(s));
   });
@@ -289,10 +287,24 @@ describe('switching an account on or off budget', () => {
   });
 });
 
+/** Runs `body` as the demo does: where rates can't be downloaded at all (M10) */
+async function asInDemo(body: () => Promise<void>) {
+  configureRatesDownload({ fetch: null });
+  try {
+    await body();
+  } finally {
+    configureRatesDownload({ fetch: fakeFrankfurter });
+  }
+}
+
 describe('downloading rates', () => {
   it('is off until turned on, and refused in the demo', async () => {
     expect((await call('POST', '/currencies/download')).status).toBe(409);
-    expect((await call('PUT', '/demo-currencies', { downloadRates: true })).status).toBe(403);
+    await asInDemo(async () => {
+      expect((await call('PUT', '/currencies', { downloadRates: true })).status).toBe(403);
+      expect((await call('POST', '/currencies/download')).status).toBe(403);
+    });
+    expect((await send('GET', '/currencies')).downloadRates).toBe(false);
     expect(requests).toEqual([]);
   });
 
@@ -311,18 +323,17 @@ describe('downloading rates', () => {
       payeeName: 'Pret',
       categoryId: 'c-food',
     });
+    // Turning it on starts a download in the background; downloading now waits for what's missing
     await send('PUT', '/currencies', { downloadRates: true });
     const result = await send('POST', '/currencies/download');
     expect(result).toMatchObject({ error: null, unsupported: [], ratesError: null });
-    expect(result.downloaded).toBeGreaterThan(0);
     // The Friday before applies to Saturday's coffee
     expect((await txIn(gbp.id))[0]).toMatchObject({ budgetAmount: -1_150, fxSource: 'rate' });
-    // Rates typed in are kept
+    // From the first transaction in GBP (March), keeping the rates typed in
     const rates = await send('GET', '/currencies/GBP/rates?limit=1000');
-    expect(rates.find((r: { date: string }) => r.date === '2026-03-01')).toMatchObject({
-      rate: 1.17,
-      source: 'manual',
-    });
+    const on = (date: string) => rates.find((r: { date: string }) => r.date === date);
+    expect(on('2026-03-05')).toMatchObject({ rate: 1.15, source: 'ecb' });
+    expect(on('2026-03-01')).toMatchObject({ rate: 1.17, source: 'manual' });
 
     // A second run only asks for what's new
     requests.length = 0;
@@ -340,6 +351,51 @@ describe('downloading rates', () => {
     const down = await send('POST', '/currencies/download');
     expect(down.ratesError).toBe('unreachable');
     frankfurterDown = false;
+  });
+
+  it('never happens in the demo, even after restoring a budget that downloads', async () => {
+    // Asked only if `fetch: null` didn't replace it
+    const asked: string[] = [];
+    configureRatesDownload({
+      fetch: async (input) => {
+        asked.push(String(input));
+        throw new TypeError('A request left the demo');
+      },
+    });
+    await asInDemo(async () => {
+      // A backup made where downloading is on brings the setting along
+      const { body: backup } = await call('GET', '/export/backup');
+      backup.budgetSettings[0].downloadRates = 1;
+      expect((await call('POST', '/export/restore', backup)).status).toBe(200);
+      const before = await send('GET', '/currencies');
+      expect(before.downloadRates).toBe(true);
+
+      // A new currency and a transaction with no rate would otherwise start downloads
+      const nok = await send('POST', '/accounts', {
+        name: 'Kroner',
+        type: 'cash',
+        currency: 'NOK',
+      });
+      await send('POST', '/transactions', {
+        accountId: nok.id,
+        date: '2026-10-08',
+        amount: -5_000,
+        payeeName: 'Rema 1000',
+      });
+      expect(await downloadRates()).toEqual({ downloaded: 0, error: null, unsupported: [] });
+      const after = await send('GET', '/currencies');
+      expect(after).toMatchObject({
+        ratesUpdatedAt: before.ratesUpdatedAt,
+        ratesError: before.ratesError,
+      });
+      expect(after.currencies.find((c: { code: string }) => c.code === 'NOK')).toMatchObject({
+        latest: null,
+        waiting: 1,
+      });
+    });
+    expect(asked).toEqual([]);
+    // The rest of the file doesn't download
+    await send('PUT', '/currencies', { downloadRates: false });
   });
 });
 

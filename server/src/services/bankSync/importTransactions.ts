@@ -3,7 +3,7 @@ import {
   EXCHANGE_WINDOW_DAYS,
   MATCH_WINDOW_DAYS,
   TRANSFER_WINDOW_DAYS,
-  looksLikeExchange,
+  exchangeSiblings,
   pickExchangeCounterpart,
   pickManualMatch,
   pickTransferCounterpart,
@@ -85,6 +85,8 @@ export function importTransactions(
     result.added++;
   }
 
+  // Transfers pair within one currency (null = the budget's)
+  const ownCurrency = added.length ? store.storedCurrency(target.accountId) : null;
   for (const { id, counterpartyAccountHash } of added) {
     // Rules may have split it; only whole, unlinked transactions pair up
     const row = store.linkable(id);
@@ -95,6 +97,7 @@ export function importTransactions(
     const other = pickTransferCounterpart(
       {
         accountId: target.accountId,
+        currency: ownCurrency,
         date: row.date,
         amount: row.amount,
         counterpartyAccountId: named === target.accountId ? null : named,
@@ -132,13 +135,6 @@ function linkExchange(
   const here = store.exchangeCandidates([target.accountId], row.date, EXCHANGE_WINDOW_DAYS);
   const self = here.find((c) => c.id === id);
   if (!self) return false;
-  // Another transaction here that also looks like an exchange makes it a guess
-  const siblings = here.filter(
-    (c) =>
-      c.id !== id &&
-      Math.sign(c.amount) === Math.sign(row.amount) &&
-      looksLikeExchange(c.text, target.currency, partners),
-  ).length;
   const others = [...partners.keys()].filter((accountId) => accountId !== target.accountId);
   const other = pickExchangeCounterpart(
     {
@@ -148,7 +144,7 @@ function linkExchange(
       amount: row.amount,
       text: self.text,
       partners,
-      siblings,
+      siblings: exchangeSiblings(here, id, row.amount, target.currency, partners),
     },
     store.exchangeCandidates(others, row.date, EXCHANGE_WINDOW_DAYS),
   );

@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import { decimalToCents } from '../../utils/money.js';
+import { cleanText } from '../../utils/text.js';
 import { isRealDate } from '../../utils/validation.js';
 import type { AccountType } from '../../utils/accountTypes.js';
 import type { RemoteBalance, RemoteTransaction } from '../bankSync/types.js';
@@ -11,16 +12,6 @@ const PAYEE_MAX = 200;
 const NOTES_MAX = 500;
 /** PSD2 consents last at most 180 days, banks may allow less */
 const MAX_CONSENT_SECONDS = 180 * 24 * 60 * 60;
-
-/** Bank-supplied text: control characters become spaces, runs of spaces collapse, length capped */
-export function cleanText(value: string | null | undefined, max: number): string {
-  return (value ?? '')
-    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, max)
-    .trim();
-}
 
 const normalizeIban = (iban: string) => iban.replace(/\s+/g, '').toUpperCase();
 

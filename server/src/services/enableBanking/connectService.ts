@@ -69,6 +69,7 @@ export async function finishConsent(
   info: ConsentInfo,
   code: string,
   api: EnableBankingApi,
+  now: () => number = Date.now,
 ): Promise<ConsentResult> {
   const session = await api.createSession(code);
   const uids = session.accounts.every((a) => a.uid)
@@ -93,23 +94,27 @@ export async function finishConsent(
     throw new EnableBankingError('No accounts in session', 200, 'NO_ACCOUNTS_ADDED');
 
   const validUntil = session.access.valid_until;
+  const at = new Date(now()).toISOString();
   const existing = info.connectionId ? enableBankingStore.getConnection(info.connectionId) : null;
   if (existing) {
     const previous = enableBankingStore.getSessionId(existing.id);
     enableBankingStore.renewConnection(existing.id, { sessionId: session.session_id, validUntil });
-    enableBankingStore.bindAccounts(existing.id, accounts);
+    enableBankingStore.bindAccounts(existing.id, accounts, at);
     // Best effort: many banks already ended it when the new consent was given
     if (previous && previous !== session.session_id) api.deleteSession(previous).catch(() => {});
     return { connectionId: existing.id, renewed: true };
   }
 
-  const connectionId = enableBankingStore.insertConnection({
-    sessionId: session.session_id,
-    aspspName: session.aspsp.name,
-    aspspCountry: session.aspsp.country,
-    validUntil,
-  });
-  enableBankingStore.bindAccounts(connectionId, accounts);
+  const connectionId = enableBankingStore.insertConnection(
+    {
+      sessionId: session.session_id,
+      aspspName: session.aspsp.name,
+      aspspCountry: session.aspsp.country,
+      validUntil,
+    },
+    at,
+  );
+  enableBankingStore.bindAccounts(connectionId, accounts, at);
   return { connectionId, renewed: false };
 }
 

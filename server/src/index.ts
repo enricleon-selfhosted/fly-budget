@@ -42,7 +42,7 @@ import {
 import { createEnableBankingService } from './services/enableBanking/service.js';
 import { serverRouter } from './routes/server.js';
 import { createCurrenciesRouter } from './routes/currencies.js';
-import { downloadRates, scheduleRatesDownload } from './services/fx/download.js';
+import { scheduleRatesDownload } from './services/fx/download.js';
 import { refreshFx } from './services/fx/fxService.js';
 import { syncAllItems } from './services/plaidSyncService.js';
 import { encryptStoredCredentials } from './services/credentialEncryption.js';
@@ -114,10 +114,7 @@ app.use('/api/custom-reports', customReportsRouter);
 app.use('/api/dashboards', dashboardsRouter);
 app.use('/api/schedules', schedulesRouter);
 app.use('/api/goals', goalsRouter);
-app.use(
-  '/api/currencies',
-  createCurrenciesRouter({ download: downloadRates, scheduleDownload: scheduleRatesDownload }),
-);
+app.use('/api/currencies', createCurrenciesRouter());
 app.use('/api/plaid', bankRateLimit, plaidRouter);
 app.use('/api/simplefin', bankRateLimit, simplefinRouter);
 app.use('/api/enablebanking', bankRateLimit, createEnableBankingRouter(enableBanking));

@@ -16,13 +16,16 @@ visitor gets a private copy that disappears when they close the tab, and nothing
   - `express` → `expressShim.ts`: routers with plain and `:param` segments, `router.param`,
     middleware chains and async handlers, `req.params/query/body`, `res.status/json/send/setHeader`.
   - `db/index.ts` → `db.ts`: the same exports, backed by sql.js through Drizzle's sql.js driver
-    (synchronous, like better-sqlite3's, so every query runs as is).
+    (synchronous, like better-sqlite3's, so every query runs as is). `db.transaction` inside
+    another one becomes a savepoint, as with better-sqlite3 (Drizzle's sql.js driver would send a
+    second BEGIN), so services that open their own transaction can run inside a route's.
   - `db/secretCrypto.ts` → `secretCrypto.ts`: no encryption (the demo never stores credentials).
   - `path` → `path.ts`: throws if used (only restore's safety copy of the database file needs it).
 - `app.ts` mounts the budget routers like `index.ts` does and answers `/health`, `/auth/status` and
   `/server/info` itself. Bank connections (`/plaid`, `/simplefin`, `/enablebanking`),
-  downloading exchange rates (`/currencies` is mounted without a download) and sign-in are
-  refused, and the app shows "needs the FlyBudget app" instead of their setup screens
+  downloading exchange rates (`configureRatesDownload({ fetch: null })`, so every caller of
+  `scheduleRatesDownload`/`downloadRates` does nothing and turning it on gets a 403) and sign-in
+  are refused, and the app shows "needs the FlyBudget app" instead of their setup screens
   (`NotInDemo`). Exchange rates typed in by hand work.
 - `worker.ts` opens an in-memory database, runs every migration in `db/migrations`, and loads the
   demo budget. "Start over" does the same again.

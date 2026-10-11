@@ -9,8 +9,8 @@ import { refreshFx } from './fxService.js';
 import { getBudgetSettings, saveBudgetSettings } from './settings.js';
 
 // Downloads the daily rates each account in another currency needs (docs/multi-currency M4),
-// only when the user turned downloading on. One download runs at a time: callers asking while
-// one runs share its result.
+// only when the user turned downloading on and the installation may download at all (the demo
+// can't, M10). One download runs at a time: callers asking while one runs share its result.
 
 export type DownloadResult = {
   /** Rates stored or changed */
@@ -20,17 +20,29 @@ export type DownloadResult = {
   unsupported: string[];
 };
 
-type Options = { fetch: typeof fetch; today: () => string };
+type Options = {
+  /** null where rates are never downloaded, whatever the budget's settings say */
+  fetch: typeof fetch | null;
+  today: () => string;
+  now: () => Date;
+};
 
 let options: Options = {
   fetch: (...args) => globalThis.fetch(...args),
   today: () => format(new Date(), 'yyyy-MM-dd'),
+  now: () => new Date(),
 };
 
-/** Tests swap in a fake service and a fixed day */
+/**
+ * Tests swap in a fake service and a fixed day. The demo passes `fetch: null`: a restored backup
+ * can turn the setting on, but nothing then downloads (M10).
+ */
 export function configureRatesDownload(next: Partial<Options>) {
   options = { ...options, ...next };
 }
+
+/** Whether this installation may download rates at all */
+export const ratesDownloadAvailable = () => options.fetch !== null;
 
 /** Each currency accounts are kept in, with the date of its first transaction */
 function currenciesInUse(today: string): { currency: string; from: string }[] {
@@ -49,6 +61,8 @@ function currenciesInUse(today: string): { currency: string; from: string }[] {
 
 async function run(): Promise<DownloadResult> {
   const result: DownloadResult = { downloaded: 0, error: null, unsupported: [] };
+  const fetchImpl = options.fetch;
+  if (!fetchImpl) return result;
   const settings = getBudgetSettings();
   const budget = settings.currency;
   if (!settings.downloadRates || !budget) return result;
@@ -58,7 +72,7 @@ async function run(): Promise<DownloadResult> {
     let changed = 0;
     try {
       for (const range of downloadRanges(downloadedRange(currency, budget), from, today)) {
-        const rates = await fetchDailyRates(options.fetch, {
+        const rates = await fetchDailyRates(fetchImpl, {
           base: currency,
           quote: budget,
           ...range,
@@ -76,7 +90,7 @@ async function run(): Promise<DownloadResult> {
   }
 
   saveBudgetSettings({
-    ratesUpdatedAt: result.error ? settings.ratesUpdatedAt : new Date().toISOString(),
+    ratesUpdatedAt: result.error ? settings.ratesUpdatedAt : options.now().toISOString(),
     ratesError:
       result.error ??
       (result.unsupported.length ? `unsupported:${result.unsupported.join(',')}` : null),
@@ -86,7 +100,7 @@ async function run(): Promise<DownloadResult> {
 
 let running: Promise<DownloadResult> | null = null;
 
-/** Downloads missing rates now (no-op while downloading is off) */
+/** Downloads missing rates now (no-op while downloading is off, or where it isn't available) */
 export function downloadRates(): Promise<DownloadResult> {
   running ??= run().finally(() => {
     running = null;
@@ -96,6 +110,6 @@ export function downloadRates(): Promise<DownloadResult> {
 
 /** Starts a download in the background, if downloading is on; failures are recorded, not thrown */
 export function scheduleRatesDownload() {
-  if (!getBudgetSettings().downloadRates) return;
+  if (!ratesDownloadAvailable() || !getBudgetSettings().downloadRates) return;
   downloadRates().catch((err) => console.error('Exchange rate download failed:', err));
 }

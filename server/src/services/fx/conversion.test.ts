@@ -3,11 +3,14 @@ import fc from 'fast-check';
 import Database from 'better-sqlite3';
 import {
   MAX_RATE_AGE_DAYS,
+  budgetAmountProblem,
   convertCents,
   downloadRanges,
+  exchangeOtherAmount,
   impliedRate,
   pickFxRate,
   rateOn,
+  type BudgetAmountRow,
   type DailyRate,
 } from './conversion.js';
 
@@ -134,6 +137,87 @@ describe('pickFxRate', () => {
 
   it('has no rate when there is none for the day', () => {
     expect(pickFxRate({ ...base, lookup: () => null })).toBeNull();
+  });
+});
+
+describe('exchangeOtherAmount', () => {
+  const foreign = new Map([['gbp', 'GBP']]);
+
+  it('is the other side’s amount only when that side is in the budget currency', () => {
+    fc.assert(
+      fc.property(cents, fc.constantFrom('gbp', 'eur'), (amount, accountId) => {
+        expect(exchangeOtherAmount({ accountId, amount }, foreign)).toBe(
+          accountId === 'eur' ? amount : null,
+        );
+      }),
+    );
+    expect(exchangeOtherAmount(undefined, foreign)).toBeNull();
+  });
+});
+
+describe('budgetAmountProblem', () => {
+  const row = (amount: number, over: Partial<BudgetAmountRow> = {}): BudgetAmountRow => ({
+    amount,
+    inForeignAccount: true,
+    isSplitPart: false,
+    exchangeIntoBudget: false,
+    ...over,
+  });
+  const flags = fc.record({
+    inForeignAccount: fc.boolean(),
+    isSplitPart: fc.boolean(),
+    exchangeIntoBudget: fc.boolean(),
+  });
+  const error = (r: BudgetAmountRow, budgetAmount: number | null) =>
+    budgetAmountProblem(r, budgetAmount)?.error ?? null;
+
+  it('accepts any amount in the same direction, on a transaction that takes one', () => {
+    fc.assert(
+      fc.property(nonZero, nonZero, (amount, typed) => {
+        const budgetAmount = Math.sign(amount) * Math.abs(typed);
+        expect(budgetAmountProblem(row(amount), budgetAmount)).toBeNull();
+      }),
+    );
+  });
+
+  it('refuses the other direction and zero, on either side', () => {
+    fc.assert(
+      fc.property(nonZero, nonZero, (amount, typed) => {
+        const wrongWay = -Math.sign(amount) * Math.abs(typed);
+        const sameWay = 'Enter an amount in the same direction as the transaction';
+        expect(budgetAmountProblem(row(amount), wrongWay)).toEqual({ status: 400, error: sameWay });
+        expect(error(row(amount), 0)).toBe(sameWay);
+        expect(error(row(0), typed)).toBe(sameWay);
+      }),
+    );
+  });
+
+  it('checks the account, then split parts, then the exchange, then the direction', () => {
+    fc.assert(
+      fc.property(flags, cents, fc.option(cents, { nil: null }), (f, amount, typed) => {
+        const r = row(amount, f);
+        const expected = !f.inForeignAccount
+          ? 'This account is in the budget’s currency'
+          : f.isSplitPart
+            ? 'Split parts use the rate of the whole transaction'
+            : typed === null
+              ? null
+              : f.exchangeIntoBudget
+                ? 'The amount comes from the exchange'
+                : amount === 0 || typed === 0 || Math.sign(amount) !== Math.sign(typed)
+                  ? 'Enter an amount in the same direction as the transaction'
+                  : null;
+        expect(error(r, typed)).toBe(expected);
+      }),
+    );
+  });
+
+  it('lets any transaction that can take an amount go back to the day’s rate', () => {
+    fc.assert(
+      fc.property(cents, fc.boolean(), (amount, exchangeIntoBudget) => {
+        expect(budgetAmountProblem(row(amount, { exchangeIntoBudget }), null)).toBeNull();
+      }),
+    );
   });
 });
 

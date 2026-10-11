@@ -31,8 +31,6 @@ export interface ConsentRegistry<I, T> {
   begin(info: I): { id: string; state: string };
   /** What the UI sees while polling */
   status(id: string): ConsentStatus<T>;
-  /** Details of a pending consent, by poll id */
-  info(id: string): I | undefined;
   /**
    * The bank sent the user back with this state. Runs `finish` exactly once even if the
    * callback and a pasted address arrive together. A failed `finish` is reported to the
@@ -46,8 +44,12 @@ export interface ConsentRegistry<I, T> {
     errorMessage: (err: unknown) => string,
     expectedId?: string,
   ): Promise<ConsentOutcome<T>> | undefined;
-  /** The bank sent the user back with an error */
-  fail(state: string, error: string): boolean;
+  /**
+   * The bank sent the user back with an error. `expectedId` binds a pasted address like in
+   * `complete`. False when the state is unknown, expired, belongs to another consent, or this
+   * one already finished or is finishing.
+   */
+  fail(state: string, error: string, expectedId?: string): boolean;
   cancel(id: string): void;
 }
 
@@ -90,10 +92,6 @@ export function createConsentRegistry<I, T>(now: () => number = Date.now): Conse
       return p.finished ?? p.failed ?? { status: 'pending' };
     },
 
-    info(id) {
-      return byId.get(id)?.info;
-    },
-
     complete(state, finish, errorMessage, expectedId) {
       const p = live(state, expectedId);
       if (!p) return undefined;
@@ -108,8 +106,8 @@ export function createConsentRegistry<I, T>(now: () => number = Date.now): Conse
       return p.inFlight;
     },
 
-    fail(state, error) {
-      const p = live(state);
+    fail(state, error, expectedId) {
+      const p = live(state, expectedId);
       if (!p || p.finished || p.inFlight) return false;
       p.finished = { status: 'error', error };
       return true;

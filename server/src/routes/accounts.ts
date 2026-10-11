@@ -2,17 +2,20 @@ import { Router } from 'express';
 import { db } from '../db/index.js';
 import { accounts, transactions } from '../db/schema.js';
 import { and, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
-import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import { logoSchema } from '../utils/logo.js';
-import { accountTypeSchema, defaultOffBudget } from '../utils/accountTypes.js';
-import { currencyCode, startsOffBudget } from '../utils/currency.js';
+import { accountTypeSchema } from '../utils/accountTypes.js';
+import { currencyCode } from '../utils/currency.js';
 import { format } from 'date-fns';
 import { convertCents } from '../services/fx/conversion.js';
-import { latestRate, refreshFx } from '../services/fx/fxService.js';
-import { scheduleRatesDownload } from '../services/fx/download.js';
-import { uncategorizeTransfersThatStopCrossing } from '../services/transactionHelpers.js';
-import { accountTransactionSum, inAccountBalance } from '../services/balances.js';
+import { latestRate } from '../services/fx/fxService.js';
+import { inAccountBalance } from '../services/balances.js';
+import {
+  accountBalance,
+  createAccount,
+  updateAccount,
+  type Account,
+} from '../services/accountService.js';
 
 export const accountsRouter = Router();
 
@@ -36,8 +39,6 @@ const createSchema = z.object({
 // that only renames an account would otherwise reset its starting balance to 0
 const updateSchema = z.object(fields).partial().extend({ logo: logoSchema.optional() });
 
-type Account = typeof accounts.$inferSelect;
-
 /**
  * An account with its balance and, in another currency, that balance's value in the budget's
  * currency at the latest rate (docs/multi-currency M6; null without a rate) and the rate's date.
@@ -55,12 +56,9 @@ function withBudgetBalance(account: Account, balance: number, today: string) {
 
 const today = () => format(new Date(), 'yyyy-MM-dd');
 
+/** An account that was just written, with its balance */
 function withBalance(account: Account) {
-  return withBudgetBalance(
-    account,
-    account.startingBalance + accountTransactionSum(account.id),
-    today(),
-  );
+  return withBudgetBalance(account, accountBalance(account.id)!, today());
 }
 
 accountsRouter.get('/', (_req, res) => {
@@ -115,25 +113,11 @@ accountsRouter.post('/', (req, res) => {
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const currency = parsed.data.currency ?? null;
-  const account = {
-    id: nanoid(),
+  const account = createAccount({
     ...parsed.data,
-    currency,
-    // Homes, cars, investments, loans and accounts in another currency start off budget unless
-    // asked otherwise
-    isOffBudget: startsOffBudget(
-      currency,
-      parsed.data.isOffBudget as 0 | 1 | undefined,
-      defaultOffBudget(parsed.data.type),
-    ),
-    sortOrder: 0,
-    closedAt: null,
-    createdAt: new Date().toISOString(),
-  };
-  db.insert(accounts).values(account).run();
-  if (currency) scheduleRatesDownload();
-  res.status(201).json(withBalance(account as Account));
+    isOffBudget: parsed.data.isOffBudget as 0 | 1 | undefined,
+  });
+  res.status(201).json(withBalance(account));
 });
 
 accountsRouter.put('/reorder', (req, res) => {
@@ -174,25 +158,13 @@ accountsRouter.put('/:id', (req, res) => {
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const data = { ...parsed.data };
-  const existing = db.select().from(accounts).where(eq(accounts.id, req.params.id)).get();
-  if (!existing) return res.status(404).json({ error: 'Not found' });
-  if (Object.keys(data).length) {
-    db.update(accounts).set(data).where(eq(accounts.id, req.params.id)).run();
-  }
-  const updated = db.select().from(accounts).where(eq(accounts.id, req.params.id)).get();
+  const updated = updateAccount(req.params.id, parsed.data);
   if (!updated) return res.status(404).json({ error: 'Not found' });
-  // Its transactions are now converted, or not, at a rate (docs/multi-currency M3)
-  if (updated.currency !== existing.currency) {
-    refreshFx({ accountIds: [updated.id] });
-    scheduleRatesDownload();
-  }
-  // Transfers whose category stopped making sense (M8)
-  const transfersUncategorized =
-    updated.isOffBudget !== existing.isOffBudget
-      ? uncategorizeTransfersThatStopCrossing(updated.id)
-      : 0;
-  res.json({ ...withBalance(updated), transfersUncategorized });
+  // transfersUncategorized: transfers whose category stopped making sense (M8)
+  res.json({
+    ...withBalance(updated.account),
+    transfersUncategorized: updated.transfersUncategorized,
+  });
 });
 
 accountsRouter.delete('/:id', (req, res) => {

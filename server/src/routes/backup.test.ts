@@ -7,9 +7,9 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { db } from '../db/index.js';
 import { errorHandler } from '../middleware/security.js';
 import { BACKUP_TABLES } from '../services/backupService.js';
-import { saveManualRate } from '../services/fx/ratesStore.js';
-import { getBudgetSettings, saveBudgetSettings } from '../services/fx/settings.js';
+import { getBudgetSettings } from '../services/fx/settings.js';
 import { accountsRouter } from './accounts.js';
+import { createCurrenciesRouter } from './currencies.js';
 import { dashboardsRouter } from './dashboards.js';
 import { exportRouter } from './export.js';
 import { goalsRouter } from './goals.js';
@@ -26,6 +26,7 @@ beforeAll(async () => {
     req.path === '/api/export/restore' ? next() : express.json()(req, res, next),
   );
   app.use('/api/accounts', accountsRouter);
+  app.use('/api/currencies', createCurrenciesRouter());
   app.use('/api/dashboards', dashboardsRouter);
   app.use('/api/export', exportRouter);
   app.use('/api/goals', goalsRouter);
@@ -159,8 +160,10 @@ describe('backup and restore', () => {
   });
 
   it('keeps the budget currency, rates and conversions (docs/multi-currency)', async () => {
-    saveBudgetSettings({ currency: 'EUR' });
-    saveManualRate('GBP', 'EUR', '2026-01-01', 1.17);
+    expect((await send('PUT', '/currencies', { currency: 'EUR' })).status).toBe(200);
+    expect((await send('PUT', '/currencies/GBP/rates/2026-01-01', { rate: 1.17 })).status).toBe(
+      200,
+    );
     const gbp = (await send('POST', '/accounts', { name: 'GBP', type: 'cash', currency: 'GBP' }))
       .body;
     await send('POST', '/transactions', { accountId: gbp.id, date: '2026-01-02', amount: -1_000 });
@@ -180,7 +183,7 @@ describe('backup and restore', () => {
   });
 
   it('restoring a backup from before budget currencies keeps this installation’s', async () => {
-    saveBudgetSettings({ currency: 'CHF' });
+    expect((await send('PUT', '/currencies', { currency: 'CHF' })).status).toBe(200);
     const res = await send('POST', '/export/restore', {
       format: 'flybudget-backup',
       version: 2,
@@ -190,7 +193,7 @@ describe('backup and restore', () => {
     expect(getBudgetSettings().currency).toBe('CHF');
 
     // A newer backup without settings or rates means none: they're replaced
-    saveManualRate('GBP', 'CHF', '2026-01-01', 0.9);
+    expect((await send('PUT', '/currencies/GBP/rates/2026-01-01', { rate: 0.9 })).status).toBe(200);
     const empty = await send('POST', '/export/restore', {
       format: 'flybudget-backup',
       version: 2,

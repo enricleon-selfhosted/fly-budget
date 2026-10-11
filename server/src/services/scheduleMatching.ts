@@ -27,23 +27,32 @@ export type MatchSchedule = {
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-/** A variable amount in the right direction but more than 25% from the usual */
-const LOOSE_AMOUNT_SCORE = 10;
+
+/** The most days a recurring item's transactions may be from their expected date */
+export const MAX_DATE_FLEXIBILITY = 14;
 
 /**
- * Points for the amount, by the item's amount type: exact must be exact; approximate within
- * 10%; variable can be anything in the same direction, closer scoring higher. 0 = doesn't fit.
+ * How an amount fits an item's expected one: `exact`; `close` (approximate within 10%, variable
+ * within 25%); `loose` (variable, in the right direction but further from the usual).
  */
-export function amountScore(amountType: string, amount: number, expected: number): number {
+export type AmountFit = 'exact' | 'close' | 'loose';
+
+const AMOUNT_POINTS: Record<AmountFit, number> = { exact: 30, close: 20, loose: 10 };
+
+/**
+ * How the amount fits, by the item's amount type: exact must be exact; approximate within 10%;
+ * variable can be anything in the same direction. null = doesn't fit.
+ */
+export function amountFit(amountType: string, amount: number, expected: number): AmountFit | null {
   if (amount === 0 || expected === 0 || Math.sign(amount) !== Math.sign(expected)) {
-    return amount === expected ? 30 : 0;
+    return amount === expected ? 'exact' : null;
   }
   const diff = Math.abs(amount - expected);
   const ratio = diff / Math.abs(expected);
-  if (diff === 0) return 30;
-  if (amountType === 'approximate') return ratio <= 0.1 ? 20 : 0;
-  if (amountType === 'variable') return ratio <= 0.25 ? 20 : LOOSE_AMOUNT_SCORE;
-  return 0;
+  if (diff === 0) return 'exact';
+  if (amountType === 'approximate') return ratio <= 0.1 ? 'close' : null;
+  if (amountType === 'variable') return ratio <= 0.25 ? 'close' : 'loose';
+  return null;
 }
 
 /** Whether the bank's text (or the payee or notes) contains the item's match text */
@@ -77,16 +86,17 @@ export function scoreMatch(
   if (daysDiff > schedule.dateFlexibility) return none;
 
   const dateScore = Math.max(0, 30 - daysDiff * 5);
-  const amount = amountScore(schedule.amountType, tx.amount, occ.expectedAmount);
-  if (amount === 0) return none;
+  const fit = amountFit(schedule.amountType, tx.amount, occ.expectedAmount);
+  if (!fit) return none;
 
   const payeeScore = identityScore(tx, schedule);
   // A variable amount far from the usual one only counts when the payee or bank text says who
-  if (amount === LOOSE_AMOUNT_SCORE && payeeScore === 0) return none;
+  if (fit === 'loose' && payeeScore === 0) return none;
   let accountScore = 0;
   if (schedule.accountId && tx.accountId === schedule.accountId) accountScore = 15;
   else if (!schedule.accountId) accountScore = 5;
 
+  const amount = AMOUNT_POINTS[fit];
   return { score: dateScore + amount + payeeScore + accountScore, payeeScore, amountScore: amount };
 }
 
@@ -107,7 +117,8 @@ export function pickImportMatches(
     occurrences
       .filter((occ) => occ.schedule.accountId === tx.accountId)
       .map((occ) => ({ tx, occ, ...scoreMatch(tx, occ, occ.schedule) }))
-      .filter((p) => p.score > 0 && p.payeeScore > 0 && p.amountScore > 0),
+      // A score means the dates and the amount fit; the payee or bank text must say who it is
+      .filter((p) => p.score > 0 && p.payeeScore > 0),
   );
   const perTx = new Map<string, number>();
   const perOcc = new Map<string, number>();

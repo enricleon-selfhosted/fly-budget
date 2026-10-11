@@ -21,9 +21,14 @@ import { dashboardsRouter } from '../routes/dashboards.js';
 import { schedulesRouter } from '../routes/schedules.js';
 import { goalsRouter } from '../routes/goals.js';
 import { createCurrenciesRouter } from '../routes/currencies.js';
+import { configureRatesDownload } from '../services/fx/download.js';
 
 /** Answer for anything that needs a real server: bank connections, sign-in. */
 const NOT_IN_DEMO = "This isn't available in the demo. Download FlyBudget to use it.";
+
+// Rates are never downloaded here (docs/multi-currency M10): every request stays in the demo,
+// even after restoring a backup made with downloading on. Rates typed in work.
+configureRatesDownload({ fetch: null });
 
 const app = Router();
 
@@ -61,11 +66,7 @@ app.use('/custom-reports', customReportsRouter as unknown as ShimRouter);
 app.use('/dashboards', dashboardsRouter as unknown as ShimRouter);
 app.use('/schedules', schedulesRouter as unknown as ShimRouter);
 app.use('/goals', goalsRouter as unknown as ShimRouter);
-// Rates typed in work; downloading needs a request outside the demo (docs/multi-currency M10)
-app.use(
-  '/currencies',
-  createCurrenciesRouter({ download: null, scheduleDownload: () => {} }) as unknown as ShimRouter,
-);
+app.use('/currencies', createCurrenciesRouter() as unknown as ShimRouter);
 
 app.use('/plaid', (_req, res) => res.status(403).json({ error: NOT_IN_DEMO }));
 app.use('/simplefin', (_req, res) => res.status(403).json({ error: NOT_IN_DEMO }));

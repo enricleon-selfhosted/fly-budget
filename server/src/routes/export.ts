@@ -7,11 +7,9 @@ import {
   parseBackup,
   restoreBackup,
   saveSafetyCopy,
-  tablesToKeep,
 } from '../services/backupService.js';
 import { eq, and, gte, lte } from 'drizzle-orm';
 import { isRealDate } from '../utils/validation.js';
-import { refreshFx } from '../services/fx/fxService.js';
 
 export const exportRouter = Router();
 
@@ -106,18 +104,16 @@ exportRouter.get('/backup', (_req, res) => {
 // (every transaction, plus logos), so this route parses its own body; index.ts skips
 // the general 10 MB parser for it. It runs after the login check like every route here.
 exportRouter.post('/restore', express.json({ limit: RESTORE_BODY_LIMIT }), async (req, res) => {
-  let data;
+  let backup;
   try {
-    data = parseBackup(req.body);
+    backup = parseBackup(req.body);
   } catch (err) {
     if (err instanceof InvalidBackupError) return res.status(400).json({ error: err.message });
     throw err;
   }
   const safetyCopy = await saveSafetyCopy();
   try {
-    const restored = restoreBackup(data, tablesToKeep(req.body));
-    // Conversions follow this installation's rates and budget currency
-    refreshFx('all');
+    const restored = restoreBackup(backup);
     res.json({ restored, safetyCopy });
   } catch (err) {
     // e.g. a row pointing at an account that isn't in the file: nothing was changed

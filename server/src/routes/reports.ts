@@ -14,9 +14,7 @@ import {
   isNotPlainTransfer,
   sumBudgetValue,
 } from '../services/balances.js';
-import { convertCents, latestRateOn, type DailyRate } from '../services/fx/conversion.js';
-import { pairRates } from '../services/fx/ratesStore.js';
-import { budgetCurrency } from '../services/fx/settings.js';
+import { balanceValuer } from '../services/fx/fxService.js';
 
 export const reportsRouter = Router();
 
@@ -124,12 +122,7 @@ reportsRouter.get('/net-worth', (req, res) => {
   // Accounts in another currency count at the rate of each period's end, and not at all before
   // they have one (docs/multi-currency M6)
   const allAccounts = db.select().from(accounts).all();
-  const budget = budgetCurrency();
-  const rates = new Map<string, DailyRate[]>();
-  for (const a of allAccounts) {
-    if (a.currency && budget && !rates.has(a.currency))
-      rates.set(a.currency, pairRates(a.currency, budget));
-  }
+  const inBudgetCurrency = balanceValuer();
 
   const upperBound = isDaily ? to : monthBounds(to).to;
   const groupExpr = isDaily
@@ -170,9 +163,9 @@ reportsRouter.get('/net-worth', (req, res) => {
       }
       let value = c.balance;
       if (c.acct.currency) {
-        const rate = latestRateOn(rates.get(c.acct.currency) ?? [], periodEnd);
-        if (!rate) continue;
-        value = convertCents(c.balance, rate.rate);
+        const valued = inBudgetCurrency(c.acct.currency, c.balance, periodEnd);
+        if (!valued) continue;
+        value = valued.value;
       }
       if (isLiabilityType(c.acct.type)) liabilities += Math.abs(Math.min(value, 0));
       else assets += Math.max(value, 0);

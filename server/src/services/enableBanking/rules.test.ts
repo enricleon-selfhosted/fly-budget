@@ -1,9 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
-import { defaultSyncFrom, planMapping, syncFromAfter } from './accountMapping.js';
-import { syncWindowStart } from './syncService.js';
+import {
+  BACKGROUND_SYNC_INTERVAL_MS,
+  consentEnded,
+  defaultSyncFrom,
+  localDay,
+  planMapping,
+  shouldSkipBackgroundSync,
+  syncFromAfter,
+  syncWindowStart,
+} from './rules.js';
 
-// The pure rules behind account mapping (D9, D11) and sync windows (D9).
+// The pure rules behind account mapping (D9, D11) and syncing (D9, D10). They load no database.
 
 const day = (offset: number) =>
   new Date(Date.UTC(2026, 0, 1) + offset * 864e5).toISOString().slice(0, 10);
@@ -101,6 +109,50 @@ describe('syncWindowStart', () => {
           else expect(start).toBe(day(Math.max(from, last - 10)));
         },
       ),
+    );
+  });
+
+  it('without a chosen date, starts where a new account’s history does', () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 0, max: 2000 }), (offset) => {
+        expect(syncWindowStart(null, null, day(offset))).toBe(defaultSyncFrom(day(offset)));
+      }),
+    );
+  });
+});
+
+describe('when to sync', () => {
+  const at = Date.parse('2026-03-20T10:00:00Z');
+  const iso = (ms: number) => new Date(ms).toISOString();
+
+  it('a background sync skips a connection synced less than 6 hours ago, and runs at 6 hours', () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 0, max: 3 * BACKGROUND_SYNC_INTERVAL_MS }), (ago) => {
+        expect(shouldSkipBackgroundSync(iso(at - ago), at)).toBe(ago < BACKGROUND_SYNC_INTERVAL_MS);
+      }),
+    );
+    expect(shouldSkipBackgroundSync(iso(at - BACKGROUND_SYNC_INTERVAL_MS + 1), at)).toBe(true);
+    expect(shouldSkipBackgroundSync(iso(at - BACKGROUND_SYNC_INTERVAL_MS), at)).toBe(false);
+    expect(shouldSkipBackgroundSync(null, at)).toBe(false);
+  });
+
+  it('a consent has ended from the moment its access runs out', () => {
+    fc.assert(
+      fc.property(fc.integer({ min: -864e5, max: 864e5 }), (offset) => {
+        expect(consentEnded(iso(at + offset), at)).toBe(offset <= 0);
+      }),
+    );
+  });
+
+  it('counts days in the server’s time zone', () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 0, max: 4e12 }), (ms) => {
+        const d = new Date(ms);
+        const expected = [d.getFullYear(), d.getMonth() + 1, d.getDate()]
+          .map((n, i) => String(n).padStart(i ? 2 : 4, '0'))
+          .join('-');
+        expect(localDay(ms)).toBe(expected);
+      }),
     );
   });
 });

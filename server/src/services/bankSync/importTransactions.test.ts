@@ -313,6 +313,22 @@ describe('transfers between the user’s accounts', () => {
     expect(importTransactions(target(open), [remote({ amount: -9_000 })]).transfers).toBe(0);
   });
 
+  it('never links an account in another currency as a plain transfer, even when the bank names it', () => {
+    const eur = account('Checking');
+    const gbp = account('GBP pocket', 'GBP');
+    importTransactions(target(gbp, 'GBP'), [remote({ currency: 'GBP', amount: 6_000 })]);
+
+    const result = importTransactions(
+      target(eur),
+      [remote({ amount: -6_000, counterpartyAccountHash: 'hash-of-gbp-iban' })],
+      { ownAccountsByIbanHash: new Map([['hash-of-gbp-iban', gbp]]) },
+    );
+
+    expect(result.transfers).toBe(0);
+    expect(rowsOf(eur)[0].transferTransactionId).toBeNull();
+    expect(rowsOf(gbp)[0].transferTransactionId).toBeNull();
+  });
+
   it('does not pair across more than 4 days', () => {
     const a = account('Checking');
     const b = account('Savings');
