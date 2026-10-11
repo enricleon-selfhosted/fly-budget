@@ -149,7 +149,6 @@ a renewal includes it again.
 
 ```json
 {
-  "budgetCurrency": "EUR",
   "accounts": [
     {
       "id": "mapping id",
@@ -167,10 +166,15 @@ a renewal includes it again.
 
 → `{ "created": 1, "linked": 1, "skipped": 1, "errors": [{ "id": "…", "error": "…" }] }`.
 
-Rules (D11): an account in another currency than `budgetCurrency` is created off budget with its
-currency stored; `link` needs the local account's currency (null = `budgetCurrency`) to equal the
-bank account's. `syncFrom` defaults per D9. Changing an imported account to `skip` keeps its
-transactions.
+The budget's currency is the one stored on the server (`budget_settings.currency`,
+multi-currency M2); a `budgetCurrency` field in the body is ignored. Without one the answer is
+409 `Choose the budget’s currency first.`
+
+Rules (D11, multi-currency M1): an account in another currency than the budget's is created with
+its currency stored and starts off budget when `isOffBudget` is left out; a sent `isOffBudget` is
+kept, so the user can put it on budget right away. `link` needs the local account's currency
+(null = the budget's) to equal the bank account's. `syncFrom` defaults per D9. Changing an
+imported account to `skip` keeps its transactions.
 
 ### `POST /connections/:id/sync` · `POST /sync-all`
 

@@ -5,9 +5,11 @@ import { SavingPausedHint } from '../connection/SavingPausedHint';
 import { CurrencyInput } from '../ui/CurrencyInput';
 import { useCreateAccount } from '../../hooks/useAccounts';
 import type { AccountType } from '../../types';
-import { accountTypeInfo } from '../../utils/accountTypes';
-import { otherCurrencyCodes, useBudgetCurrency } from '../../utils/budgetCurrency';
+import { accountTypeInfo, startsOffBudget } from '../../utils/accountTypes';
+import { otherCurrencyCodes } from '../../utils/budgetCurrency';
+import { useBudgetCurrency } from '../../hooks/useBudgetCurrency';
 import { AccountTypeSelect } from './AccountTypeSelect';
+import { ForeignBudgetHint } from './ForeignBudgetHint';
 
 interface Props {
   isOpen: boolean;
@@ -25,9 +27,7 @@ export function AddAccountModal({ isOpen, onClose }: Props) {
   const createAccount = useCreateAccount();
   const budget = useBudgetCurrency();
   const info = accountTypeInfo(type);
-  // Accounts in another currency are always off budget (the server refuses otherwise)
   const foreign = currency !== null;
-  const offBudget = foreign || isOffBudget;
 
   function handleClose() {
     setName('');
@@ -40,13 +40,13 @@ export function AddAccountModal({ isOpen, onClose }: Props) {
 
   function handleTypeChange(next: AccountType) {
     setType(next);
-    setIsOffBudget(foreign || !accountTypeInfo(next).onBudget);
+    setIsOffBudget(startsOffBudget(next, foreign));
   }
 
   function handleCurrencyChange(next: string | null) {
     setCurrency(next);
-    // Going back to the budget's currency doesn't put the account back on budget
-    if (next !== null) setIsOffBudget(true);
+    // A new account in another currency starts off budget (M1), but can be ticked back on
+    if (next !== null) setIsOffBudget(startsOffBudget(type, true));
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -57,7 +57,7 @@ export function AddAccountModal({ isOpen, onClose }: Props) {
       type,
       // Debts are entered as the amount owed and stored as a negative balance
       startingBalance: info.liability ? -Math.abs(amount) : amount,
-      isOffBudget: offBudget ? 1 : 0,
+      isOffBudget: isOffBudget ? 1 : 0,
       currency,
     });
     handleClose();
@@ -125,23 +125,23 @@ export function AddAccountModal({ isOpen, onClose }: Props) {
           <p className="mt-1 text-xs text-text-secondary">{amountHint}</p>
         </div>
 
-        <label
-          className={`flex items-start gap-3 max-md:min-h-11 ${foreign ? 'cursor-not-allowed' : 'cursor-pointer'}`}
-        >
+        <label className="flex items-start gap-3 max-md:min-h-11 cursor-pointer">
           <input
             type="checkbox"
-            checked={offBudget}
-            disabled={foreign}
+            checked={isOffBudget}
             onChange={(e) => setIsOffBudget(e.target.checked)}
-            className="mt-0.5 h-4 w-4 rounded border-border text-brand-600 focus:ring-brand-500 disabled:opacity-60"
+            className="mt-0.5 h-4 w-4 rounded border-border text-brand-600 focus:ring-brand-500"
           />
           <span className="text-sm text-text-secondary">
             Off budget
-            <span className="block text-xs text-text-tertiary">
-              {foreign
-                ? 'Accounts in another currency stay off budget.'
-                : 'Counts toward net worth but not your budget. Recommended for investments, property and loans.'}
-            </span>
+            {currency !== null ? (
+              <ForeignBudgetHint currency={currency} offBudget={isOffBudget} />
+            ) : (
+              <span className="block text-xs text-text-tertiary">
+                Counts toward net worth but not your budget. Recommended for investments, property
+                and loans.
+              </span>
+            )}
           </span>
         </label>
 

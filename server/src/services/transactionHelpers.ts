@@ -1,6 +1,7 @@
 import { db } from '../db/index.js';
 import { accounts, payees, transactions } from '../db/schema.js';
-import { and, eq, gte, isNull, lte, ne } from 'drizzle-orm';
+import { and, eq, gte, isNotNull, isNull, lte, ne, or } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/sqlite-core';
 import { addDays, format, parseISO } from 'date-fns';
 import { nanoid } from 'nanoid';
 import { unlinkOccurrenceByTransactionId } from './matchingEngine.js';
@@ -13,6 +14,8 @@ import {
   sideTakesCategory,
   transferPairProblem,
 } from '../utils/transferRules.js';
+import { convertTransactions } from './fx/fxService.js';
+import { afterTransactionsWritten } from './transactionFx.js';
 
 export function resolvePayee(
   payeeName: string | null | undefined,
@@ -65,6 +68,8 @@ export function deleteTransactionRow(row: { id: string; transferTransactionId: s
     tx.delete(transactions).where(eq(transactions.parentTransactionId, row.id)).run();
     tx.delete(transactions).where(eq(transactions.id, row.id)).run();
   });
+  // The other side is no longer an exchange: it goes back to a rate of its own (M3)
+  if (row.transferTransactionId) convertTransactions([row.transferTransactionId]);
 }
 
 // ---------------------------------------------------------------------------
@@ -216,6 +221,7 @@ export function createTransfer(
     tx.insert(transactions).values(fromTx).run();
     tx.insert(transactions).values(toTx).run();
   });
+  afterTransactionsWritten([fromId, toId]);
   return { ok: true, rows: [fromTx, toTx] };
 }
 
@@ -299,6 +305,13 @@ export function updateTransferSide(
  * recognizes money moving between the user's own accounts, and by "Link as transfer".
  */
 export function linkTransfer(aId: string, bId: string): TransferOutcome {
+  const outcome = linkTransferRows(aId, bId);
+  // An exchange into the budget's currency fixes the other side's rate (docs/multi-currency M3)
+  if (outcome.ok) convertTransactions([aId, bId]);
+  return outcome;
+}
+
+function linkTransferRows(aId: string, bId: string): TransferOutcome {
   return db.transaction((tx) => {
     const [a, b] = [aId, bId].map((id) =>
       tx.select().from(transactions).where(eq(transactions.id, id)).get(),
@@ -343,6 +356,17 @@ export function linkTransfer(aId: string, bId: string): TransferOutcome {
  * the bank (or CSV) named, if it has one.
  */
 export function unlinkTransfer(id: string): TransferOutcome {
+  const otherId = db
+    .select({ other: transactions.transferTransactionId })
+    .from(transactions)
+    .where(eq(transactions.id, id))
+    .get()?.other;
+  const outcome = unlinkTransferRows(id);
+  if (outcome.ok) convertTransactions(otherId ? [id, otherId] : [id]);
+  return outcome;
+}
+
+function unlinkTransferRows(id: string): TransferOutcome {
   return db.transaction((tx) => {
     const row = tx.select().from(transactions).where(eq(transactions.id, id)).get();
     if (!row) return refuse('not_found', 'Not found');
@@ -431,4 +455,42 @@ export function transferCandidates(id: string): TransferCandidate[] | null {
     amount: c.amount,
     payeeName: c.payeeName,
   }));
+}
+
+/**
+ * After an account moves on or off budget: transfers between it and other accounts that no longer
+ * cross the budget boundary lose their category (docs/multi-currency M8, D26), so money isn't
+ * counted twice. Returns how many transactions changed.
+ */
+export function uncategorizeTransfersThatStopCrossing(accountId: string): number {
+  const budgetStatus = new Map(
+    db
+      .select(transferAccountColumns)
+      .from(accounts)
+      .all()
+      .map((a) => [a.id, a]),
+  );
+  const other = alias(transactions, 'other');
+  const rows = db
+    .select({ id: transactions.id, self: transactions.accountId, other: other.accountId })
+    .from(transactions)
+    .innerJoin(other, eq(other.id, transactions.transferTransactionId))
+    .where(
+      and(
+        isNotNull(transactions.categoryId),
+        or(eq(transactions.accountId, accountId), eq(other.accountId, accountId)),
+      ),
+    )
+    .all();
+  const stale = rows.filter((r) => {
+    const self = budgetStatus.get(r.self);
+    const otherAccount = budgetStatus.get(r.other);
+    return !self || !otherAccount || !sideTakesCategory(self, otherAccount);
+  });
+  db.transaction((tx) => {
+    for (const r of stale) {
+      tx.update(transactions).set({ categoryId: null }).where(eq(transactions.id, r.id)).run();
+    }
+  });
+  return stale.length;
 }

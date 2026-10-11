@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import { logError } from '../../utils/log.js';
 import { accountSummary } from '../accountService.js';
+import { budgetCurrency as storedBudgetCurrency } from '../fx/settings.js';
 import { applyMappings } from './accountMapping.js';
 import { createEnableBankingClient, type EnableBankingApi, type PsuHeaders } from './client.js';
 import {
@@ -27,14 +28,16 @@ import { enableBankingStore, type BankAccountRow, type StoredConfig } from './st
 import { emptySyncResult, syncConnection, type SyncResult } from './syncService.js';
 
 // Everything the routes can do with Enable Banking, wired from the single-purpose modules.
-// The API client and the clock are injected, so routes and services are tested against a
-// fake Enable Banking without mocking modules.
+// The API client, the clock and the budget's currency are injected, so routes and services are
+// tested against a fake Enable Banking without mocking modules.
 
 const BANK_LIST_TTL_MS = 60 * 60 * 1000;
 
 export type EnableBankingServiceDeps = {
   makeApi?: (config: Pick<StoredConfig, 'applicationId' | 'privateKey'>) => EnableBankingApi;
   now?: () => number;
+  /** The budget's currency, stored on the server (docs/multi-currency M2); null until set */
+  budgetCurrency?: () => string | null;
 };
 
 export type AccountView = {
@@ -79,6 +82,7 @@ function accountView(row: BankAccountRow): AccountView {
 
 export function createEnableBankingService(deps: EnableBankingServiceDeps = {}) {
   const now = deps.now ?? Date.now;
+  const budgetCurrency = deps.budgetCurrency ?? storedBudgetCurrency;
   const makeApi =
     deps.makeApi ??
     ((config: Pick<StoredConfig, 'applicationId' | 'privateKey'>) =>
@@ -267,10 +271,13 @@ export function createEnableBankingService(deps: EnableBankingServiceDeps = {}) 
       }));
     },
 
-    mapAccounts(connectionId: string, budgetCurrency: string, requests: MappingRequest[]) {
+    /** The budget's currency decides which accounts are in another currency (M2) */
+    mapAccounts(connectionId: string, requests: MappingRequest[]) {
       if (!enableBankingStore.getConnection(connectionId))
         throw new NotFoundError('That connection doesn’t exist anymore.');
-      return applyMappings(connectionId, requests, budgetCurrency, localDay(now()));
+      const currency = budgetCurrency();
+      if (!currency) throw new ConflictError('Choose the budget’s currency first.');
+      return applyMappings(connectionId, requests, currency, localDay(now()));
     },
 
     sync(connectionId: string, psu?: PsuHeaders): Promise<SyncResult> {

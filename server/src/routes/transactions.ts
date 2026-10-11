@@ -15,7 +15,14 @@ import {
   type TransferRefusal,
 } from '../services/transactionHelpers.js';
 import { buildRuleContext, insertNewTransaction, loadRules } from '../services/ruleService.js';
+import { afterTransactionsWritten } from '../services/transactionFx.js';
 import { isoDate } from '../utils/validation.js';
+import { convertCents } from '../services/fx/conversion.js';
+import {
+  convertTransactions,
+  foreignCurrencies,
+  setBudgetAmount,
+} from '../services/fx/fxService.js';
 
 export const transactionsRouter = Router();
 
@@ -24,6 +31,16 @@ function transferStatus(reason: TransferRefusal): 400 | 403 | 404 {
   if (reason === 'not_found') return 404;
   if (reason === 'reconciled') return 403;
   return 400;
+}
+
+/** Thrown inside an edit's database transaction to roll it back and answer with this status */
+class EditRefused extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
 }
 
 const id = z.string().min(1).max(64);
@@ -58,7 +75,12 @@ const createSchema = z.object({
     .optional(),
 });
 
-const updateSchema = createSchema.omit({ id: true, splits: true, adjustment: true }).partial();
+const updateSchema = createSchema
+  .omit({ id: true, splits: true, adjustment: true })
+  .partial()
+  // In an account in another currency: its value in the budget's currency, typed in (null goes
+  // back to the day's rate; docs/multi-currency M3)
+  .extend({ budgetAmount: cents.nullable().optional() });
 
 const transferSchema = z
   .object({
@@ -190,11 +212,21 @@ transactionsRouter.get('/', (req, res) => {
       : [],
   );
 
+  // In accounts in another currency, each row's value in the budget's currency (null while it
+  // has no rate); rows in the budget's currency don't have one
+  const foreign = foreignCurrencies();
+  const withBudgetAmount = <T extends (typeof rows)[number]>(r: T) =>
+    foreign.has(r.accountId)
+      ? { ...r, budgetAmount: r.fxRate === null ? null : convertCents(r.amount, r.fxRate) }
+      : r;
+
   const result = rows.map((r) => {
     const other = r.transferTransactionId ? others.get(r.transferTransactionId) : undefined;
     return {
-      ...r,
-      ...(r.isParent === 1 ? { children: childrenMap.get(r.id) ?? [] } : {}),
+      ...withBudgetAmount(r),
+      ...(r.isParent === 1
+        ? { children: (childrenMap.get(r.id) ?? []).map(withBudgetAmount) }
+        : {}),
       ...(other ? { transferAccountId: other.accountId, transferAmount: other.amount } : {}),
     };
   });
@@ -273,6 +305,7 @@ transactionsRouter.post('/', (req, res) => {
       tx.insert(transactions).values(parent).run();
       for (const child of childRows) tx.insert(transactions).values(child).run();
     });
+    afterTransactionsWritten([parentId]);
 
     return res.status(201).json({ ...parent, children: childRows });
   }
@@ -348,8 +381,9 @@ transactionsRouter.post('/import/confirm', (req, res) => {
   if (!db.select({ id: accounts.id }).from(accounts).where(eq(accounts.id, accountId)).get()) {
     return res.status(404).json({ error: 'Account not found' });
   }
-  let imported = 0;
-  const ruleOpts = { rules: loadRules(), ctx: buildRuleContext() };
+  const inserted: string[] = [];
+  // Rules load once, and rows in another currency are converted together at the end
+  const insertOpts = { rules: loadRules(), ctx: buildRuleContext(), deferFx: true };
 
   // One transaction: all rows or none, and far faster than a commit per row
   db.transaction(() => {
@@ -363,7 +397,7 @@ transactionsRouter.post('/import/confirm', (req, res) => {
         .get();
       if (dup) continue;
 
-      insertNewTransaction(
+      const { transaction } = insertNewTransaction(
         {
           accountId,
           date: row.date,
@@ -375,13 +409,14 @@ transactionsRouter.post('/import/confirm', (req, res) => {
           categoryId: null,
           importedId: row.importedId,
         },
-        ruleOpts,
+        insertOpts,
       );
-      imported++;
+      inserted.push(transaction.id);
     }
+    afterTransactionsWritten(inserted);
   });
 
-  res.json({ imported, skipped: rows.length - imported });
+  res.json({ imported: inserted.length, skipped: rows.length - inserted.length });
 });
 
 // PUT /transactions/:id
@@ -396,7 +431,7 @@ transactionsRouter.put('/:id', (req, res) => {
   if (existing.reconciled === 1)
     return res.status(403).json({ error: 'Cannot modify a reconciled transaction' });
 
-  const data = parsed.data;
+  const { budgetAmount, ...data } = parsed.data;
   const changes = (key: keyof typeof data) =>
     data[key] !== undefined && data[key] !== existing[key];
   if (
@@ -410,31 +445,39 @@ transactionsRouter.put('/:id', (req, res) => {
   if (existing.isParent === 1 && (changes('amount') || data.categoryId)) {
     return res.status(400).json({ error: 'Edit the parts of a split transaction instead' });
   }
-  const side = db.transaction((tx) => {
-    // A transfer's other side keeps step, and the pair must stay valid (D25, D26). It writes
-    // nothing when it refuses, so nothing else is written either.
-    const side = updateTransferSide(tx, existing, data);
-    if (!side.ok) return side;
-    if (Object.keys(data).length) {
-      tx.update(transactions).set(data).where(eq(transactions.id, existing.id)).run();
-    }
-    if (existing.isParent === 1) {
-      const shared = {
-        accountId: data.accountId,
-        date: data.date,
-        payeeId: data.payeeId,
-        payeeName: data.payeeName,
-      };
-      if (Object.values(shared).some((v) => v !== undefined)) {
-        tx.update(transactions)
-          .set(shared)
-          .where(eq(transactions.parentTransactionId, existing.id))
-          .run();
+  try {
+    db.transaction((tx) => {
+      // A transfer's other side keeps step, and the pair must stay valid (D25, D26)
+      const side = updateTransferSide(tx, existing, data);
+      if (!side.ok) throw new EditRefused(transferStatus(side.reason), side.error);
+      if (Object.keys(data).length) {
+        tx.update(transactions).set(data).where(eq(transactions.id, existing.id)).run();
       }
-    }
-    return side;
-  });
-  if (!side.ok) return res.status(transferStatus(side.reason)).json({ error: side.error });
+      if (existing.isParent === 1) {
+        const shared = {
+          accountId: data.accountId,
+          date: data.date,
+          payeeId: data.payeeId,
+          payeeName: data.payeeName,
+        };
+        if (Object.values(shared).some((v) => v !== undefined)) {
+          tx.update(transactions)
+            .set(shared)
+            .where(eq(transactions.parentTransactionId, existing.id))
+            .run();
+        }
+      }
+      convertTransactions([existing.id]);
+      // Checked against the transaction as edited: a new amount or account decides what's valid
+      if (budgetAmount !== undefined) {
+        const set = setBudgetAmount(existing.id, budgetAmount);
+        if (!set.ok) throw new EditRefused(set.status, set.error);
+      }
+    });
+  } catch (err) {
+    if (err instanceof EditRefused) return res.status(err.status).json({ error: err.message });
+    throw err;
+  }
   const updated = db.select().from(transactions).where(eq(transactions.id, req.params.id)).get();
   res.json(updated);
 });

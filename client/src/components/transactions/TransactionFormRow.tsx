@@ -7,7 +7,8 @@ import { CategorySelect } from './CategorySelect';
 import type { Account, CategoryGroup, Payee, Transaction } from '../../types';
 import type { CreateTransactionData, SplitItem } from '../../api/transactions';
 import { parseCents, centsToInput, formatCurrency } from '../../utils/currency';
-import { accountCurrency, useBudgetCurrency } from '../../utils/budgetCurrency';
+import { accountCurrency } from '../../utils/budgetCurrency';
+import { useBudgetCurrency } from '../../hooks/useBudgetCurrency';
 import { isExchange } from '../../utils/transfers';
 
 /** What the form saves */

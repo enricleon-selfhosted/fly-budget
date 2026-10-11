@@ -6,7 +6,8 @@ import { Button } from '../ui/Button';
 import { SavedOnDeviceHint } from '../connection/SavingPausedHint';
 import { CurrencyInput } from '../ui/CurrencyInput';
 import { formatCurrency } from '../../utils/currency';
-import { accountCurrency, useBudgetCurrency } from '../../utils/budgetCurrency';
+import { accountCurrency } from '../../utils/budgetCurrency';
+import { useBudgetCurrency } from '../../hooks/useBudgetCurrency';
 import {
   budgetSideHint,
   crossesBudgetBoundary,

@@ -2,7 +2,6 @@ import { Router, type Request, type RequestHandler, type Response } from 'expres
 import { z } from 'zod';
 import { logError } from '../utils/log.js';
 import { cleanText } from '../utils/text.js';
-import { currencyCode } from '../utils/currency.js';
 import { isoDate } from '../utils/validation.js';
 import { accountTypeSchema } from '../utils/accountTypes.js';
 import { isPublicAddress } from '../services/safeFetch.js';
@@ -43,8 +42,9 @@ const startSchema = z.object({
 
 const completeSchema = z.object({ redirectedTo: z.string().min(1).max(10_000) });
 
+// The budget's currency is the server's (docs/multi-currency M2); a `budgetCurrency` older
+// clients still send is dropped
 const mappingSchema = z.object({
-  budgetCurrency: currencyCode,
   accounts: z
     .array(
       z.discriminatedUnion('action', [
@@ -175,9 +175,7 @@ export function createEnableBankingRouter(service: EnableBankingService) {
     const parsed = mappingSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
     try {
-      res.json(
-        service.mapAccounts(req.params.id, parsed.data.budgetCurrency, parsed.data.accounts),
-      );
+      res.json(service.mapAccounts(req.params.id, parsed.data.accounts));
     } catch (err) {
       sendError(res, err, 'Could not save your choices.');
     }

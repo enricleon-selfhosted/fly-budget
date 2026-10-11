@@ -6,8 +6,15 @@ import { z } from 'zod';
 import { logoSchema } from '../utils/logo.js';
 import { accountTypeSchema } from '../utils/accountTypes.js';
 import { currencyCode } from '../utils/currency.js';
+import { format } from 'date-fns';
+import { balanceValuer } from '../services/fx/fxService.js';
 import { inAccountBalance } from '../services/balances.js';
-import { accountBalance, createAccount, type Account } from '../services/accountService.js';
+import {
+  accountBalance,
+  createAccount,
+  updateAccount,
+  type Account,
+} from '../services/accountService.js';
 
 export const accountsRouter = Router();
 
@@ -20,8 +27,6 @@ const fields = {
   currency: currencyCode.nullable(),
 };
 
-const FOREIGN_ON_BUDGET = 'Accounts in another currency stay off budget';
-
 const createSchema = z.object({
   ...fields,
   startingBalance: fields.startingBalance.default(0),
@@ -33,9 +38,29 @@ const createSchema = z.object({
 // that only renames an account would otherwise reset its starting balance to 0
 const updateSchema = z.object(fields).partial().extend({ logo: logoSchema.optional() });
 
+type Valuer = ReturnType<typeof balanceValuer>;
+
+/**
+ * An account with its balance and, in another currency, that balance's value in the budget's
+ * currency at the latest rate (docs/multi-currency M6; null without a rate) and the rate's date.
+ * `value` is one `balanceValuer()` per request, which reads each currency's rates once.
+ */
+function withBudgetBalance(account: Account, balance: number, today: string, value: Valuer) {
+  if (!account.currency) return { ...account, balance };
+  const valued = value(account.currency, balance, today);
+  return {
+    ...account,
+    balance,
+    budgetBalance: valued?.value ?? null,
+    budgetBalanceAsOf: valued?.asOf ?? null,
+  };
+}
+
+const today = () => format(new Date(), 'yyyy-MM-dd');
+
 /** An account that was just written, with its balance */
 function withBalance(account: Account) {
-  return { ...account, balance: accountBalance(account.id)! };
+  return withBudgetBalance(account, accountBalance(account.id)!, today(), balanceValuer());
 }
 
 accountsRouter.get('/', (_req, res) => {
@@ -58,7 +83,11 @@ accountsRouter.get('/', (_req, res) => {
     .all();
 
   const sumMap = Object.fromEntries(sums.map((s) => [s.accountId, s.sum]));
-  res.json(rows.map((a) => ({ ...a, balance: a.startingBalance + (sumMap[a.id] ?? 0) })));
+  const day = today();
+  const value = balanceValuer();
+  res.json(
+    rows.map((a) => withBudgetBalance(a, a.startingBalance + (sumMap[a.id] ?? 0), day, value)),
+  );
 });
 
 accountsRouter.get('/balances-ago', (_req, res) => {
@@ -89,8 +118,6 @@ accountsRouter.post('/', (req, res) => {
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  if (parsed.data.currency && parsed.data.isOffBudget === 0)
-    return res.status(400).json({ error: FOREIGN_ON_BUDGET });
   const account = createAccount({
     ...parsed.data,
     isOffBudget: parsed.data.isOffBudget as 0 | 1 | undefined,
@@ -136,20 +163,13 @@ accountsRouter.put('/:id', (req, res) => {
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const data = { ...parsed.data };
-  const existing = db.select().from(accounts).where(eq(accounts.id, req.params.id)).get();
-  if (!existing) return res.status(404).json({ error: 'Not found' });
-  const currency = data.currency !== undefined ? data.currency : existing.currency;
-  if (currency) {
-    if (data.isOffBudget === 0) return res.status(400).json({ error: FOREIGN_ON_BUDGET });
-    if (existing.isOffBudget === 0) data.isOffBudget = 1;
-  }
-  if (Object.keys(data).length) {
-    db.update(accounts).set(data).where(eq(accounts.id, req.params.id)).run();
-  }
-  const updated = db.select().from(accounts).where(eq(accounts.id, req.params.id)).get();
+  const updated = updateAccount(req.params.id, parsed.data);
   if (!updated) return res.status(404).json({ error: 'Not found' });
-  res.json(withBalance(updated));
+  // transfersUncategorized: transfers whose category stopped making sense (M8)
+  res.json({
+    ...withBalance(updated.account),
+    transfersUncategorized: updated.transfersUncategorized,
+  });
 });
 
 accountsRouter.delete('/:id', (req, res) => {

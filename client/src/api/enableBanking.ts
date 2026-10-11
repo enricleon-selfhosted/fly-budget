@@ -58,14 +58,15 @@ export const cancelEnableBankingConsent = (id: string) =>
 export const getEnableBankingConnections = () =>
   apiFetch<EnableBankingConnection[]>('/enablebanking/connections');
 
+// The server decides which accounts are in another currency from the budget's currency it
+// stores (docs/multi-currency M2), so the request doesn't carry one
 export const mapEnableBankingAccounts = (
   connectionId: string,
-  budgetCurrency: string,
   accounts: EnableBankingMappingAction[],
 ) =>
   apiFetch<EnableBankingMappingResult>(
     `/enablebanking/connections/${encodeURIComponent(connectionId)}/accounts`,
-    { method: 'PUT', body: JSON.stringify({ budgetCurrency, accounts }) },
+    { method: 'PUT', body: JSON.stringify({ accounts }) },
   );
 
 export const syncEnableBankingConnection = (connectionId: string) =>

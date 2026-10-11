@@ -8,7 +8,7 @@ import type {
   EnableBankingMappingResult,
   EnableBankingSyncResult,
 } from '../../types';
-import { accountTypeInfo } from '../../utils/accountTypes';
+import { startsOffBudget } from '../../utils/accountTypes';
 import { accountCurrency } from '../../utils/budgetCurrency';
 
 // Pure logic for the Enable Banking screens: no requests, no store, no clock (the caller
@@ -99,11 +99,6 @@ export function bankCurrency(account: Pick<EnableBankingAccount, 'currency'>, bu
   return accountCurrency(account, budget);
 }
 
-/** The default for "Off budget": cash and credit accounts are on budget, the rest off */
-export function defaultOffBudget(type: AccountType, foreign: boolean): boolean {
-  return foreign || !accountTypeInfo(type).onBudget;
-}
-
 export type MappingAction = 'create' | 'link' | 'skip';
 
 /** One bank account's choice in the mapping form */
@@ -113,7 +108,7 @@ export interface MappingRow {
   name: string;
   /** New account: its type */
   type: AccountType;
-  /** New account: off budget (always, for another currency) */
+  /** New account: off budget (starts ticked for another currency, M1, but can be unticked) */
   offBudget: boolean;
   /** Existing account: the FlyBudget account ('' = none chosen yet) */
   accountId: string;
@@ -131,7 +126,7 @@ export function initialMappingRow(
   const base = {
     name: account.name,
     type: account.suggestedType,
-    offBudget: defaultOffBudget(account.suggestedType, foreign),
+    offBudget: startsOffBudget(account.suggestedType, foreign),
   };
   if (account.accountId) {
     return {
@@ -211,7 +206,6 @@ export function linkOptions(
 export function mappingAction(
   account: EnableBankingAccount,
   row: MappingRow,
-  budget: string,
 ): EnableBankingMappingAction | null {
   if (row.action === 'skip') return { id: account.id, action: 'skip' };
   if (row.action === 'link') {
@@ -225,13 +219,12 @@ export function mappingAction(
   }
   const accountName = row.name.trim();
   if (!accountName) return null;
-  const foreign = bankCurrency(account, budget) !== budget;
   return {
     id: account.id,
     action: 'create',
     accountName,
     accountType: row.type,
-    isOffBudget: foreign || row.offBudget ? 1 : 0,
+    isOffBudget: row.offBudget ? 1 : 0,
     syncFrom: row.syncFrom || undefined,
   };
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { formatCurrency, parseCents } from '../../utils/currency';
 
 interface Props {
@@ -23,20 +23,24 @@ export function CurrencyInput({
 }: Props) {
   const [focused, setFocused] = useState(false);
   const [raw, setRaw] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+  const selectWhenShown = useRef(false);
 
-  function handleFocus(e: React.FocusEvent<HTMLInputElement>) {
+  function handleFocus() {
     const initial = value === 0 ? '' : String(value / 100);
     setFocused(true);
     setRaw(initial);
-    // Select the amount once it's shown for editing, so typing replaces it. Only if nothing
-    // was typed in the meantime, or the first keystroke would be selected and overwritten.
-    const input = e.currentTarget;
-    if (initial) {
-      requestAnimationFrame(() => {
-        if (document.activeElement === input && input.value === initial) input.select();
-      });
-    }
+    selectWhenShown.current = initial !== '';
   }
+
+  // Select the amount as soon as it's shown for editing (the field re-renders as a number input,
+  // which drops any selection), before anything can be typed, so typing replaces it
+  useLayoutEffect(() => {
+    if (!focused || !selectWhenShown.current) return;
+    selectWhenShown.current = false;
+    const input = inputRef.current;
+    if (input && document.activeElement === input) input.select();
+  }, [focused]);
 
   function handleBlur() {
     setFocused(false);
@@ -46,6 +50,7 @@ export function CurrencyInput({
 
   return (
     <input
+      ref={inputRef}
       type={focused ? 'number' : 'text'}
       value={focused ? raw : value === 0 ? '' : formatCurrency(value, currency)}
       onFocus={handleFocus}

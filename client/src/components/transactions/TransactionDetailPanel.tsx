@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { X, Lock, Trash2, Repeat, Unlink, Wand2, Link2 } from 'lucide-react';
 import {
   useUpdateTransaction,
@@ -13,6 +14,7 @@ import { LinkTransferModal } from './LinkTransferModal';
 import { PayeeCombobox } from './PayeeCombobox';
 import { Button } from '../ui/Button';
 import { ConfirmModal } from '../ui/ConfirmModal';
+import { CurrencyInput } from '../ui/CurrencyInput';
 import { useModalValue } from '../ui/Modal';
 import { RuleEditorFlow } from '../rules/RuleEditorFlow';
 import { PayeeIcon } from '../payees/PayeeIcon';
@@ -20,7 +22,9 @@ import { useUpdatePayee } from '../../hooks/usePayees';
 import { usePreferencesStore } from '../../store/preferencesStore';
 import { AccountIcon } from '../accounts/AccountIcon';
 import { formatCurrency } from '../../utils/currency';
-import { accountCurrency, useBudgetCurrency } from '../../utils/budgetCurrency';
+import { accountCurrency } from '../../utils/budgetCurrency';
+import { useBudgetCurrency } from '../../hooks/useBudgetCurrency';
+import { budgetValueEditable, fxNote } from '../../utils/fxDisplay';
 import {
   budgetSideHint,
   budgetSideTakesCategory,
@@ -62,6 +66,8 @@ export function TransactionDetailPanel({
   onClose,
 }: Props) {
   const updateTx = useUpdateTransaction();
+  // Its own instance: its error belongs to the value section, not to the other fields
+  const saveValue = useUpdateTransaction();
   const updatePayee = useUpdatePayee();
   const deleteTx = useDeleteTransaction();
   const unlinkTransferTx = useUnlinkTransfer();
@@ -92,6 +98,7 @@ export function TransactionDetailPanel({
     setShowCategoryPicker(false);
     // An error from unlinking another transaction doesn't belong to this one
     unlinkTransferTx.reset();
+    saveValue.reset();
   }, [tx.id, tx.date, tx.notes, tx.payeeId, tx.payeeName]);
 
   useEffect(() => {
@@ -146,6 +153,19 @@ export function TransactionDetailPanel({
   const payeeName = tx.payeeName || (isTransfer ? 'Transfer' : '—');
   const payee = tx.payeeId ? payees.find((p) => p.id === tx.payeeId) : undefined;
   const categoryEntry = tx.categoryId ? (categoryMap.get(tx.categoryId) ?? null) : null;
+
+  // In an account in another currency: its value in the budget's currency (docs/multi-currency).
+  // Split parts follow their whole transaction, and an exchange's value is what arrived elsewhere.
+  const accountCode = currency ?? budgetCode;
+  const valueLocked = !budgetValueEditable(tx);
+  const valueEditable = !valueLocked && canSave;
+
+  /** Typed in as a positive amount: it takes the direction of the transaction */
+  function saveBudgetValue(cents: number) {
+    if (!valueEditable || cents === 0) return;
+    const value = tx.amount < 0 ? -cents : cents;
+    if (value !== tx.budgetAmount) saveValue.mutate({ id: tx.id, data: { budgetAmount: value } });
+  }
 
   function saveDate() {
     if (localDate !== tx.date) {
@@ -255,6 +275,61 @@ export function TransactionDetailPanel({
           <div className="flex items-center gap-2 px-3 py-2 bg-surface-alt rounded-lg text-text-tertiary text-xs">
             <Lock size={12} />
             <span>This transaction is reconciled and cannot be edited.</span>
+          </div>
+        )}
+
+        {tx.budgetAmount !== undefined && (
+          <div className="space-y-2">
+            <div className="text-xs font-medium text-text-secondary">Value in {budgetCode}</div>
+            {valueEditable ? (
+              <CurrencyInput
+                value={Math.abs(tx.budgetAmount ?? 0)}
+                onChange={saveBudgetValue}
+                placeholder="Type the amount"
+                aria-label={`Value in ${budgetCode}`}
+              />
+            ) : (
+              <p className="text-sm tabular-nums text-text">
+                {tx.budgetAmount === null
+                  ? 'Not counted yet'
+                  : formatCurrency(Math.abs(tx.budgetAmount))}
+              </p>
+            )}
+            {tx.fxSource === 'exchange' ? (
+              <p className="text-xs text-text-tertiary">
+                From an exchange with {otherAccount?.name ?? 'the other account'}. It's the amount
+                that {tx.amount < 0 ? 'arrived in' : 'left'} that account.
+              </p>
+            ) : tx.fxSource ? (
+              <p className="text-xs text-text-tertiary">
+                {fxNote(tx.fxSource, tx.fxRate, accountCode, budgetCode)}
+              </p>
+            ) : (
+              <p className="text-xs text-text-tertiary">
+                No exchange rate yet, so it stays out of your budget and reports.{' '}
+                {valueEditable && 'Type the amount above, or '}add a rate under{' '}
+                <Link to="/settings?tab=currencies" className="text-brand-600 hover:underline">
+                  Exchange rates
+                </Link>
+                .
+              </p>
+            )}
+            {tx.fxSource === 'manual' && !valueLocked && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => saveValue.mutate({ id: tx.id, data: { budgetAmount: null } })}
+                disabled={!canSave || saveValue.isPending}
+              >
+                Use the day's rate
+              </Button>
+            )}
+            {!valueLocked && !canSave && <SavingPausedHint />}
+            {saveValue.error && (
+              <p role="alert" className="text-xs text-negative">
+                {saveValue.error.message}
+              </p>
+            )}
           </div>
         )}
 

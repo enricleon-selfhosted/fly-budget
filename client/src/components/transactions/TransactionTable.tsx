@@ -21,21 +21,20 @@ import { useOpenFromLink } from '../../hooks/useOpenFromLink';
 import { docsUrl } from '../../utils/project';
 import { useAddTransaction } from '../../hooks/useOffline';
 import { formatCurrency } from '../../utils/currency';
+import { budgetTotal } from '../../utils/fxDisplay';
 import { transferRequest, type TransferAccount } from '../../utils/transfers';
 import type { FilterState } from './TransactionFilters';
 import type { CategoryGroup, Transaction } from '../../types';
 
-/** A day's absolute amounts, one total per currency (null = the budget's) */
-function sumByCurrency(
-  txs: Transaction[],
-  accounts: ReadonlyMap<string, { currency: string | null }>,
-): Array<[string | null, number]> {
-  const totals = new Map<string | null, number>();
-  for (const tx of txs) {
-    const currency = accounts.get(tx.accountId)?.currency ?? null;
-    totals.set(currency, (totals.get(currency) ?? 0) + Math.abs(tx.amount));
+/**
+ * A day's absolute total. One account's rows share its currency, so they add up as they are.
+ * Across accounts they add up in the budget's currency (rows waiting for a rate are left out).
+ */
+function dayTotal(txs: Transaction[], singleAccount: boolean): { total: number; waiting: number } {
+  if (singleAccount) {
+    return { total: txs.reduce((sum, tx) => sum + Math.abs(tx.amount), 0), waiting: 0 };
   }
-  return [...totals];
+  return budgetTotal(txs);
 }
 
 interface Props {
@@ -159,11 +158,15 @@ export function TransactionTable({
     }
   }, [panelVisible]);
 
+  // The day headers' currency: the register's own, or the budget's across accounts
+  const totalCurrency = accountId ? currencyOf(accountId) : null;
+
   const groupedByDate = useMemo(() => {
     const result: Array<{
       date: string;
       txs: Transaction[];
-      totals: Array<[string | null, number]>;
+      total: number;
+      waiting: number;
     }> = [];
     let currentDate = '';
     let currentTxs: Transaction[] = [];
@@ -174,7 +177,7 @@ export function TransactionTable({
           result.push({
             date: currentDate,
             txs: currentTxs,
-            totals: sumByCurrency(currentTxs, accountInfoMap),
+            ...dayTotal(currentTxs, !!accountId),
           });
         }
         currentDate = tx.date;
@@ -188,12 +191,12 @@ export function TransactionTable({
       result.push({
         date: currentDate,
         txs: currentTxs,
-        totals: sumByCurrency(currentTxs, accountInfoMap),
+        ...dayTotal(currentTxs, !!accountId),
       });
     }
 
     return result;
-  }, [transactions, accountInfoMap]);
+  }, [transactions, accountId]);
 
   /** An account as the transfer rules see it (one not loaded yet: the budget's currency, on budget) */
   function transferAccount(id: string): TransferAccount {
@@ -349,9 +352,15 @@ export function TransactionTable({
                     {format(parseISO(group.date), 'MMMM d, yyyy')}
                   </span>
                   <span className="text-sm font-medium text-text-secondary tabular-nums">
-                    {group.totals
-                      .map(([currency, total]) => formatCurrency(total, currency))
-                      .join(' · ')}
+                    {formatCurrency(group.total, totalCurrency)}
+                    {group.waiting > 0 && (
+                      <span
+                        title="Not in this total until they have an exchange rate"
+                        className="ml-2 text-xs font-normal text-text-tertiary"
+                      >
+                        {group.waiting} waiting for a rate
+                      </span>
+                    )}
                   </span>
                 </div>
 

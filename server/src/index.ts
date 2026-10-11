@@ -41,6 +41,9 @@ import {
 } from './routes/enableBanking.js';
 import { createEnableBankingService } from './services/enableBanking/service.js';
 import { serverRouter } from './routes/server.js';
+import { createCurrenciesRouter } from './routes/currencies.js';
+import { scheduleRatesDownload } from './services/fx/download.js';
+import { refreshFx } from './services/fx/fxService.js';
 import { syncAllItems } from './services/plaidSyncService.js';
 import { encryptStoredCredentials } from './services/credentialEncryption.js';
 import { seedDefaultCategories } from './db/defaultCategories.js';
@@ -111,6 +114,7 @@ app.use('/api/custom-reports', customReportsRouter);
 app.use('/api/dashboards', dashboardsRouter);
 app.use('/api/schedules', schedulesRouter);
 app.use('/api/goals', goalsRouter);
+app.use('/api/currencies', createCurrenciesRouter());
 app.use('/api/plaid', bankRateLimit, plaidRouter);
 app.use('/api/simplefin', bankRateLimit, simplefinRouter);
 app.use('/api/enablebanking', bankRateLimit, createEnableBankingRouter(enableBanking));
@@ -232,12 +236,17 @@ function runStartupTasks() {
       .catch((err) => console.error('Enable Banking sync error:', err.message)),
   ]);
 
-  bankSyncDone.then(() =>
+  bankSyncDone.then(() => {
     runStartupTask('Scheduled transactions', () => {
       const scheduled = autoCreateDueScheduled();
       if (scheduled > 0) console.log(`Auto-created ${scheduled} scheduled transaction(s)`);
-    }),
-  );
+    });
+    // Catch up conversions of accounts in another currency, then fetch missing rates if allowed
+    runStartupTask('Exchange rates', () => {
+      refreshFx('all');
+      scheduleRatesDownload();
+    });
+  });
 }
 
 // Auto-start unless bundled for Electron production (where main.ts calls startServer directly)

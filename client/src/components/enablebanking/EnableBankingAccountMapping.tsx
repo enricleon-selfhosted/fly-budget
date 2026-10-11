@@ -5,8 +5,10 @@ import { useMapEnableBankingAccounts } from '../../hooks/useEnableBanking';
 import { SavingPausedHint } from '../connection/SavingPausedHint';
 import { AccountTypeSelect } from '../accounts/AccountTypeSelect';
 import { Button } from '../ui/Button';
-import { useBudgetCurrency } from '../../utils/budgetCurrency';
+import { useBudgetCurrency } from '../../hooks/useBudgetCurrency';
 import { formatCurrency } from '../../utils/currency';
+import { startsOffBudget } from '../../utils/accountTypes';
+import { ForeignBudgetHint } from '../accounts/ForeignBudgetHint';
 import type {
   Account,
   EnableBankingAccount,
@@ -16,7 +18,6 @@ import type {
 import {
   DEFAULT_IMPORT_DAYS,
   bankCurrency,
-  defaultOffBudget,
   initialMappingRow,
   isoDate,
   linkOptions,
@@ -63,7 +64,7 @@ export function EnableBankingAccountMapping({
   // Accounts the latest consent leaves out are shown, but can't be imported until a renewal
   // includes them again, so nothing is sent for them
   const mappable = accounts.filter((a) => a.inConsent !== false);
-  const actions = mappable.map((a) => mappingAction(a, rows[a.id], budget));
+  const actions = mappable.map((a) => mappingAction(a, rows[a.id]));
   const complete = actions.every((action) => action !== null);
   const requested = actions.filter(
     (action): action is EnableBankingMappingAction => action !== null,
@@ -89,11 +90,7 @@ export function EnableBankingAccountMapping({
     e.preventDefault();
     if (!complete || !canSave || map.isPending || result) return;
     try {
-      const mapped = await map.mutateAsync({
-        connectionId,
-        budgetCurrency: budget,
-        accounts: requested,
-      });
+      const mapped = await map.mutateAsync({ connectionId, accounts: requested });
       if (mapped.errors.length === 0) onDone(mapped);
       else setResult(mapped);
     } catch {
@@ -233,7 +230,7 @@ export function EnableBankingAccountMapping({
                       setRow(account, {
                         ...row,
                         type,
-                        offBudget: defaultOffBudget(type, foreign),
+                        offBudget: startsOffBudget(type, foreign),
                       })
                     }
                   />
@@ -241,18 +238,19 @@ export function EnableBankingAccountMapping({
                   <label className={choiceClass}>
                     <input
                       type="checkbox"
-                      checked={foreign || row.offBudget}
-                      disabled={foreign}
+                      checked={row.offBudget}
                       onChange={(e) => setRow(account, { ...row, offBudget: e.target.checked })}
                       className="mt-1 h-4 w-4 rounded border-border text-brand-600 focus:ring-brand-500"
                     />
                     <span>
                       Off budget
-                      <span className="block text-xs text-text-tertiary">
-                        {foreign
-                          ? 'Accounts in another currency stay off budget.'
-                          : 'Counts toward net worth but not your budget.'}
-                      </span>
+                      {foreign ? (
+                        <ForeignBudgetHint currency={currency} offBudget={row.offBudget} />
+                      ) : (
+                        <span className="block text-xs text-text-tertiary">
+                          Counts toward net worth but not your budget.
+                        </span>
+                      )}
                     </span>
                   </label>
 

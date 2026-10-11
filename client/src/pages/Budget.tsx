@@ -11,6 +11,7 @@ import { BudgetEditPopover } from '../components/budget/BudgetEditPopover';
 import { Button } from '../components/ui/Button';
 import { SpentBar } from '../components/budget/SpentBar';
 import { PhoneBudget } from '../components/budget/PhoneBudget';
+import { WaitingForRateNotice } from '../components/budget/WaitingForRateNotice';
 import { useIsPhone } from '../hooks/useIsPhone';
 import { useCanSave } from '../hooks/useConnection';
 import { ExternalLink } from '../components/ui/ExternalLink';
@@ -523,6 +524,8 @@ export default function BudgetPage() {
           </p>
         </div>
       )}
+
+      <WaitingForRateNotice count={summary?.waitingForRate ?? 0} />
 
       {/* Phones: the summary (with To Be Budgeted) goes above the table instead of beside it */}
       {/* While the next month loads, the previous one stays (faded) so nothing jumps */}

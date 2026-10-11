@@ -3,6 +3,7 @@
 import type { CreateTransferData } from '../api/transactions';
 import type { Transaction } from '../types';
 import { formatCurrency } from './currency';
+import { rateText } from './currencyRates';
 
 /** What the transfer rules look at in an account */
 export interface TransferAccount {
@@ -43,22 +44,15 @@ export function budgetSideHint(moneyComesIn: boolean): string {
 }
 
 /**
- * How much of the received currency one unit of the sent currency bought: |to| / |from|, rounded
- * to four decimals (1.1605 for GBP to EUR). Null when either amount is zero, or the rate would
- * round to zero (a rate of 0.0000 says nothing).
+ * How much of the received currency one unit of the sent currency bought: |to| / |from| (1.1605
+ * for GBP 500.00 to EUR 580.25). Null when either amount is zero.
  */
 export function exchangeRate(fromCents: number, toCents: number): number | null {
   const from = Math.abs(fromCents);
   const to = Math.abs(toCents);
   if (from === 0 || to === 0) return null;
-  const rate = Math.round((to / from) * 10_000) / 10_000;
-  return rate > 0 ? rate : null;
+  return to / from;
 }
-
-const rateFormat = new Intl.NumberFormat('en-US', {
-  minimumFractionDigits: 4,
-  maximumFractionDigits: 4,
-});
 
 /**
  * "GBP 500.00 → EUR 580.25 · 1 GBP = 1.1605 EUR": what was sent, what arrived and the rate. The
@@ -71,7 +65,7 @@ export function exchangeLabel(
   const amounts = `${formatCurrency(Math.abs(sent.cents), sent.code)} → ${formatCurrency(Math.abs(received.cents), received.code)}`;
   const rate = exchangeRate(sent.cents, received.cents);
   if (rate === null) return amounts;
-  return `${amounts} · 1 ${sent.code} = ${rateFormat.format(rate)} ${received.code}`;
+  return `${amounts} · ${rateText(sent.code, received.code, rate)}`;
 }
 
 /**

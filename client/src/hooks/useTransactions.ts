@@ -65,10 +65,11 @@ export function useUpdateTransaction() {
       return { old: findTxInCache(qc, id) };
     },
     onSuccess: (_, { id, data }, ctx) => {
-      qc.invalidateQueries({ queryKey: ['transactions'] });
-      qc.invalidateQueries({ queryKey: ['accounts'] });
+      // Its amount, date, category or value moves budget and report figures
+      refreshBudgetFigures(qc);
       if (!ctx?.old) return;
       const snapshot = ctx.old;
+      const valueChanged = data.budgetAmount !== undefined;
       useUndoStore.getState().push({
         description: `Edit transaction`,
         undo: async () => {
@@ -80,14 +81,19 @@ export function useUpdateTransaction() {
             payeeName: snapshot.payeeName,
             categoryId: snapshot.categoryId,
             notes: snapshot.notes,
+            // Back to the value typed in before, or to the day's rate when there wasn't one
+            ...(valueChanged
+              ? {
+                  budgetAmount:
+                    snapshot.fxSource === 'manual' ? (snapshot.budgetAmount ?? null) : null,
+                }
+              : {}),
           });
-          qc.invalidateQueries({ queryKey: ['transactions'] });
-          qc.invalidateQueries({ queryKey: ['accounts'] });
+          refreshBudgetFigures(qc);
         },
         redo: async () => {
           await txApi.updateTransaction(id, data);
-          qc.invalidateQueries({ queryKey: ['transactions'] });
-          qc.invalidateQueries({ queryKey: ['accounts'] });
+          refreshBudgetFigures(qc);
         },
       });
     },
@@ -140,8 +146,8 @@ export function useTransferCandidates(id: string | null, enabled: boolean) {
 }
 
 /**
- * Two existing transactions become one transfer (or an exchange, across currencies); the payees
- * and budget figures change with it
+ * Two existing transactions become one transfer (or an exchange, across currencies, which also
+ * sets the rate they're converted at); the payees and budget figures change with it
  */
 export function useLinkTransfer() {
   const qc = useQueryClient();
