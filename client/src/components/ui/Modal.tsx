@@ -11,6 +11,8 @@ interface Props {
 }
 
 const sizeClasses = { sm: 'max-w-sm', md: 'max-w-md', lg: 'max-w-lg', xl: 'max-w-3xl' };
+/** Dialogs open now, the topmost last */
+const openModals: symbol[] = [];
 // Matches --animate-dialog-out / --animate-sheet-out / --animate-fade-out in index.css
 const EXIT_MS = 120;
 
@@ -53,14 +55,23 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }: Props) 
     return () => clearTimeout(t);
   }, [closing]);
 
+  // Escape closes only the topmost dialog (one can open over another, e.g. connecting a bank
+  // from the Welcome page's setup dialog)
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
     if (!isOpen) return;
+    const self = Symbol('modal');
+    openModals.push(self);
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && openModals.at(-1) === self) closeRef.current();
     };
     document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [isOpen, onClose]);
+    return () => {
+      document.removeEventListener('keydown', handler);
+      openModals.splice(openModals.indexOf(self), 1);
+    };
+  }, [isOpen]);
 
   if (!mounted) return null;
 

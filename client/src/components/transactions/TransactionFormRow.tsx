@@ -371,7 +371,9 @@ export function TransactionFormRow({
             <span
               className={`text-xs tabular-nums ${splitRemaining === 0 ? 'text-positive' : 'text-negative'}`}
             >
-              {splitRemaining === 0 ? 'Balanced' : `${formatCurrency(splitRemaining)} remaining`}
+              {splitRemaining === 0
+                ? 'Balanced'
+                : `${formatCurrency(splitRemaining, accounts?.find((a) => a.id === accountId)?.currency)} remaining`}
             </span>
           </div>
         </div>

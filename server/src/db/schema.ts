@@ -26,6 +26,11 @@ export const accounts = sqliteTable('accounts', {
   closedAt: text('closed_at'),
   /** Custom logo as a small image data URL; null = colored initials */
   logo: text('logo'),
+  /**
+   * ISO 4217 code, set only when the account's currency differs from the budget's (null = the
+   * budget currency). Such accounts stay off budget and out of net worth totals.
+   */
+  currency: text('currency'),
   createdAt: text('created_at')
     .notNull()
     .default(sql`(datetime('now'))`),
@@ -366,6 +371,90 @@ export const plaidAccountMappings = sqliteTable(
   },
   (table) => [
     uniqueIndex('plaid_account_mapping_unique').on(table.plaidItemId, table.plaidAccountId),
+  ],
+);
+
+// --- Enable Banking (European banks, PSD2) — docs/enable-banking/architecture.md ---
+
+/** The user's own Enable Banking application. Single row, id 'default'. */
+export const enableBankingConfig = sqliteTable('enable_banking_config', {
+  id: text('id').primaryKey(),
+  applicationId: text('application_id').notNull(),
+  /** PEM private key of the application; signs the API's JWTs */
+  privateKey: encryptedText('private_key').notNull(),
+  /** One of the redirect URLs registered in the application */
+  redirectUrl: text('redirect_url').notNull(),
+  /** PRODUCTION or SANDBOX, as Enable Banking reports it */
+  environment: text('environment').notNull(),
+  createdAt: text('created_at')
+    .notNull()
+    .default(sql`(datetime('now'))`),
+  updatedAt: text('updated_at')
+    .notNull()
+    .default(sql`(datetime('now'))`),
+});
+
+/** One consent at one bank. Renewing it replaces the session in place. */
+export const enableBankingConnections = sqliteTable('enable_banking_connections', {
+  id: text('id').primaryKey(),
+  /** Grants access to the accounts together with the private key */
+  sessionId: encryptedText('session_id').notNull(),
+  aspspName: text('aspsp_name').notNull(),
+  aspspCountry: text('aspsp_country').notNull(),
+  /** When the consent ends (RFC 3339) */
+  validUntil: text('valid_until').notNull(),
+  /** good | syncing | error | reauth_required */
+  syncStatus: text('sync_status').notNull().default('good'),
+  syncError: text('sync_error'),
+  /** When every account last synced without an error */
+  lastSyncedAt: text('last_synced_at'),
+  /** When a sync last read from the bank, failed or not: the 6-hour rule counts from it (D10) */
+  lastAttemptAt: text('last_attempt_at'),
+  createdAt: text('created_at')
+    .notNull()
+    .default(sql`(datetime('now'))`),
+});
+
+/** A bank account in a connection, and the FlyBudget account it imports into (if any). */
+export const enableBankingAccounts = sqliteTable(
+  'enable_banking_accounts',
+  {
+    id: text('id').primaryKey(),
+    connectionId: text('connection_id')
+      .notNull()
+      .references(() => enableBankingConnections.id, { onDelete: 'cascade' }),
+    /** Per-session id used in API paths; changes when the consent is renewed */
+    accountUid: text('account_uid').notNull(),
+    /** Enable Banking's id for the account itself, stable across sessions */
+    identificationHash: text('identification_hash').notNull(),
+    accountId: text('account_id').references(() => accounts.id, { onDelete: 'set null' }),
+    name: text('name').notNull(),
+    /** e.g. "ES12 •••• 3456"; the IBAN itself is never stored */
+    ibanMask: text('iban_mask'),
+    /** SHA-256 of the IBAN, to recognize transfers from the user's other accounts */
+    ibanHash: text('iban_hash'),
+    currency: text('currency'),
+    /** CACC | CARD | SVGS | LOAN | CASH | OTHR */
+    cashAccountType: text('cash_account_type'),
+    /** 0 = the user chose not to import it */
+    isEnabled: integer('is_enabled').notNull().default(1),
+    /** 0 when the latest consent leaves it out (D18): it can't be imported until one covers it */
+    inConsent: integer('in_consent').notNull().default(1),
+    /** First day to import (YYYY-MM-DD) */
+    syncFrom: text('sync_from'),
+    /** When this account's transactions were last imported; null until its first sync (D9) */
+    lastSyncedAt: text('last_synced_at'),
+    /** 1 for an account created from the bank until its first sync sets the opening balance */
+    openingBalancePending: integer('opening_balance_pending').notNull().default(0),
+    /** The latest balance the bank reported, shown next to FlyBudget's */
+    bankBalance: integer('bank_balance'),
+    bankBalanceAt: text('bank_balance_at'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => [
+    uniqueIndex('enable_banking_account_unique').on(table.connectionId, table.identificationHash),
   ],
 );
 

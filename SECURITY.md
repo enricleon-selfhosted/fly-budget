@@ -96,13 +96,14 @@ Run it behind an HTTPS reverse proxy before exposing it to the internet.
 
 ### What is stored, and where
 
-| Data                               | Location (desktop app)                     | Protection                                                                                        |
-| ---------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------- |
-| Budget, accounts, transactions     | `budget.db` in the app's data folder       | Your OS user account (not encrypted by FlyBudget; see below)                                      |
-| Plaid secret and access tokens     | `budget.db`                                | AES-256-GCM, with a key protected by the OS (Windows DPAPI, macOS Keychain, Linux secret service) |
-| SimpleFIN access URL (credentials) | `budget.db`                                | Same as above                                                                                     |
-| Encryption key for the above       | `credentials.key` in the app's data folder | Encrypted by the OS; only usable by your user account on that machine                             |
-| Display preferences                | Browser storage inside the app             | Not sensitive                                                                                     |
+| Data                                 | Location (desktop app)                     | Protection                                                                                        |
+| ------------------------------------ | ------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| Budget, accounts, transactions       | `budget.db` in the app's data folder       | Your OS user account (not encrypted by FlyBudget; see below)                                      |
+| Plaid secret and access tokens       | `budget.db`                                | AES-256-GCM, with a key protected by the OS (Windows DPAPI, macOS Keychain, Linux secret service) |
+| SimpleFIN access URL (credentials)   | `budget.db`                                | Same as above                                                                                     |
+| Enable Banking private key, sessions | `budget.db`                                | Same as above                                                                                     |
+| Encryption key for the above         | `credentials.key` in the app's data folder | Encrypted by the OS; only usable by your user account on that machine                             |
+| Display preferences                  | Browser storage inside the app             | Not sensitive                                                                                     |
 
 A copied or backed-up `budget.db` therefore does **not** give bank access.
 Access tokens are never sent to the app's own UI, logs, or backup exports.
@@ -115,8 +116,8 @@ Access tokens are never sent to the app's own UI, logs, or backup exports.
   request needs a random per-launch secret held in an HttpOnly cookie, so other
   programs and users on the same machine can't read your data.
 - **Outbound.** The only external services contacted are Plaid (the
-  `plaid.com` API) and your SimpleFIN bridge, always
-  over HTTPS. SimpleFIN URLs are restricted to public HTTPS addresses (checked at
+  `plaid.com` API), your SimpleFIN bridge and Enable Banking
+  (`api.enablebanking.com`), always over HTTPS. SimpleFIN URLs are restricted to public HTTPS addresses (checked at
   connection time), redirects are re-validated, and requests time out. Fonts and
   all other assets are bundled with the app; nothing is loaded from other sites.
 - **Content Security Policy.** The UI can only run code shipped with the app
@@ -134,6 +135,15 @@ Access tokens are never sent to the app's own UI, logs, or backup exports.
 - **SimpleFIN:** SimpleFIN has no revoke API. Disconnecting deletes FlyBudget's
   copy of the access URL; to revoke access completely, also remove the app in
   your [SimpleFIN Bridge](https://bridge.simplefin.org) account.
+- **Enable Banking:** you use your own Enable Banking application and private
+  key, which never leave FlyBudget's server (requests are signed with it there).
+  You approve access on your bank's own page in your web browser. When the bank
+  sends your browser back, FlyBudget accepts it only with the single-use,
+  random `state` it created for that attempt (valid 30 minutes); that one
+  callback is the only request accepted without the app's own cookie, and it
+  shows a static page. IBANs are stored only as a hash and a masked form.
+  Disconnecting ends the session at Enable Banking first; if it can't be
+  reached, the connection is kept so you can retry.
 - Data from banks is treated as untrusted: it is validated, amounts are converted
   exactly, and exported CSV files are protected against formula injection.
 

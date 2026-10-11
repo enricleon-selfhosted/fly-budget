@@ -4,7 +4,11 @@ import { transactions, payees, accounts, categories } from '../db/schema.js';
 import { eq, and, or, like, gte, lte, sql, isNull, inArray } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
-import { deleteTransactionRow, resolvePayee } from '../services/transactionHelpers.js';
+import {
+  deleteTransactionRow,
+  resolvePayee,
+  unlinkTransfer,
+} from '../services/transactionHelpers.js';
 import { buildRuleContext, insertNewTransaction, loadRules } from '../services/ruleService.js';
 import { isoDate } from '../utils/validation.js';
 
@@ -269,6 +273,9 @@ transactionsRouter.post('/transfer', (req, res) => {
   const fromAcct = db.select().from(accounts).where(eq(accounts.id, fromAccountId)).get();
   const toAcct = db.select().from(accounts).where(eq(accounts.id, toAccountId)).get();
   if (!fromAcct || !toAcct) return res.status(404).json({ error: 'Account not found' });
+  // Both sides move the same amount: only meaningful within one currency
+  if (fromAcct.currency !== toAcct.currency)
+    return res.status(400).json({ error: 'Transfers need two accounts in the same currency' });
 
   const fromId = txId ?? nanoid();
   const toId = nanoid();
@@ -442,6 +449,14 @@ transactionsRouter.put('/:id', (req, res) => {
   });
   const updated = db.select().from(transactions).where(eq(transactions.id, req.params.id)).get();
   res.json(updated);
+});
+
+// POST /transactions/:id/unlink-transfer — two ordinary transactions again (e.g. bank sync
+// recognized a transfer that wasn't one)
+transactionsRouter.post('/:id/unlink-transfer', (req, res) => {
+  const outcome = unlinkTransfer(req.params.id);
+  if (!outcome.ok) return res.status(outcome.status).json({ error: outcome.error });
+  res.json(db.select().from(transactions).where(eq(transactions.id, req.params.id)).get());
 });
 
 // DELETE /transactions/:id — handles transfer unlinking and split cascade

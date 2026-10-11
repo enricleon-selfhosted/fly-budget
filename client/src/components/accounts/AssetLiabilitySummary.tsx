@@ -29,16 +29,27 @@ interface Props {
 }
 
 export function AssetLiabilitySummary({ accounts }: Props) {
-  const { assets, liabilities } = useMemo(() => {
+  const { assets, liabilities, otherCurrencies } = useMemo(() => {
     // Sums per group, and which groups have any accounts at all
     const assetSums = new Map<AccountGroup, number>();
     const liabilitySums = new Map<AccountGroup, number>();
+    // Accounts in another currency can't be added to the budget currency's totals (there are
+    // no exchange rates): their net balance per currency is shown on its own line
+    const otherSums = new Map<string, number>();
     for (const a of accounts) {
+      if (a.currency !== null) {
+        otherSums.set(a.currency, (otherSums.get(a.currency) ?? 0) + a.balance);
+        continue;
+      }
       const info = accountTypeInfo(a.type);
       const sums = info.liability ? liabilitySums : assetSums;
       sums.set(info.group, (sums.get(info.group) ?? 0) + a.balance);
     }
-    return { assets: assetSums, liabilities: liabilitySums };
+    return {
+      assets: assetSums,
+      liabilities: liabilitySums,
+      otherCurrencies: [...otherSums],
+    };
   }, [accounts]);
 
   return (
@@ -57,6 +68,17 @@ export function AssetLiabilitySummary({ accounts }: Props) {
         emptyText="No credit cards or loans yet."
         owed
       />
+      {otherCurrencies.length > 0 && (
+        <>
+          <div className="border-t border-border-light my-4" />
+          <p className="text-sm text-text-secondary">
+            Other currencies:{' '}
+            <span className="font-medium tabular-nums text-text">
+              {otherCurrencies.map(([code, sum]) => formatCurrency(sum, code)).join(' · ')}
+            </span>
+          </p>
+        </>
+      )}
     </div>
   );
 }

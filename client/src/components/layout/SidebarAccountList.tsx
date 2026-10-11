@@ -27,11 +27,18 @@ function AccountRow({ account }: { account: Account }) {
         }`
       }
     >
-      <span className="truncate">{account.name}</span>
+      <span className="flex items-center gap-1.5 min-w-0">
+        <span className="truncate">{account.name}</span>
+        {account.currency && (
+          <span className="shrink-0 rounded border border-sidebar-text/30 px-1 text-[9px] font-semibold tracking-wide text-sidebar-text/70">
+            {account.currency}
+          </span>
+        )}
+      </span>
       <span
         className={`ml-2 tabular-nums text-[11px] shrink-0 ${isNegative ? 'text-negative/80' : 'text-sidebar-text/50'}`}
       >
-        {formatCurrency(account.balance)}
+        {formatCurrency(account.balance, account.currency)}
       </span>
     </NavLink>
   );
@@ -92,9 +99,13 @@ export function SidebarAccountList() {
 
   const onBudget = accounts.filter((a) => a.isOffBudget === 0);
   const offBudget = accounts.filter((a) => a.isOffBudget === 1);
-  const allTotal = accounts.reduce((sum, a) => sum + a.balance, 0);
+  // Totals add up one currency: accounts in another currency are shown in theirs, not added here
+  const inBudgetCurrency = accounts.filter((a) => a.currency === null);
+  const allTotal = inBudgetCurrency.reduce((sum, a) => sum + a.balance, 0);
   const onBudgetTotal = onBudget.reduce((sum, a) => sum + a.balance, 0);
-  const offBudgetTotal = offBudget.reduce((sum, a) => sum + a.balance, 0);
+  const offBudgetTotal = offBudget
+    .filter((a) => a.currency === null)
+    .reduce((sum, a) => sum + a.balance, 0);
 
   return (
     <>
@@ -142,7 +153,9 @@ export function SidebarAccountList() {
             >
               <span>Off budget</span>
               <span className="flex items-center gap-1">
-                <span className="tabular-nums text-[12px]">{formatCurrency(offBudgetTotal)}</span>
+                {offBudget.some((a) => a.currency === null) && (
+                  <span className="tabular-nums text-[12px]">{formatCurrency(offBudgetTotal)}</span>
+                )}
                 {offBudgetOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
               </span>
             </button>

@@ -7,6 +7,8 @@ interface Props {
   placeholder?: string;
   className?: string;
   allowNegative?: boolean;
+  /** The account's own currency when it isn't the budget's (`Account.currency`) */
+  currency?: string | null;
   'aria-label'?: string;
 }
 
@@ -16,6 +18,7 @@ export function CurrencyInput({
   placeholder = '0.00',
   className = '',
   allowNegative = false,
+  currency = null,
   'aria-label': ariaLabel,
 }: Props) {
   const [focused, setFocused] = useState(false);
@@ -44,7 +47,7 @@ export function CurrencyInput({
   return (
     <input
       type={focused ? 'number' : 'text'}
-      value={focused ? raw : value === 0 ? '' : formatCurrency(value)}
+      value={focused ? raw : value === 0 ? '' : formatCurrency(value, currency)}
       onFocus={handleFocus}
       onBlur={handleBlur}
       onChange={(e) => setRaw(e.target.value)}

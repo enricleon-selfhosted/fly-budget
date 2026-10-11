@@ -2,11 +2,12 @@ import { Router } from 'express';
 import { db } from '../db/index.js';
 import { accounts, transactions } from '../db/schema.js';
 import { and, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
-import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import { logoSchema } from '../utils/logo.js';
-import { accountTypeSchema, defaultOffBudget } from '../utils/accountTypes.js';
-import { accountTransactionSum, inAccountBalance } from '../services/balances.js';
+import { accountTypeSchema } from '../utils/accountTypes.js';
+import { currencyCode } from '../utils/currency.js';
+import { inAccountBalance } from '../services/balances.js';
+import { accountBalance, createAccount, type Account } from '../services/accountService.js';
 
 export const accountsRouter = Router();
 
@@ -15,20 +16,26 @@ const fields = {
   type: accountTypeSchema,
   startingBalance: z.number().int(),
   isOffBudget: z.number().int().min(0).max(1),
+  /** Only for an account in another currency than the budget's (see utils/currency.ts) */
+  currency: currencyCode.nullable(),
 };
+
+const FOREIGN_ON_BUDGET = 'Accounts in another currency stay off budget';
 
 const createSchema = z.object({
   ...fields,
   startingBalance: fields.startingBalance.default(0),
   isOffBudget: fields.isOffBudget.optional(),
+  currency: fields.currency.optional(),
 });
 
 // Built without defaults: Zod applies `.default()` even inside `.partial()`, so an update
 // that only renames an account would otherwise reset its starting balance to 0
 const updateSchema = z.object(fields).partial().extend({ logo: logoSchema.optional() });
 
-function withBalance(account: typeof accounts.$inferSelect) {
-  return { ...account, balance: account.startingBalance + accountTransactionSum(account.id) };
+/** An account that was just written, with its balance */
+function withBalance(account: Account) {
+  return { ...account, balance: accountBalance(account.id)! };
 }
 
 accountsRouter.get('/', (_req, res) => {
@@ -82,17 +89,13 @@ accountsRouter.post('/', (req, res) => {
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const account = {
-    id: nanoid(),
+  if (parsed.data.currency && parsed.data.isOffBudget === 0)
+    return res.status(400).json({ error: FOREIGN_ON_BUDGET });
+  const account = createAccount({
     ...parsed.data,
-    // Homes, cars, investments and loans stay off budget unless asked otherwise
-    isOffBudget: parsed.data.isOffBudget ?? defaultOffBudget(parsed.data.type),
-    sortOrder: 0,
-    closedAt: null,
-    createdAt: new Date().toISOString(),
-  };
-  db.insert(accounts).values(account).run();
-  res.status(201).json(withBalance(account as typeof accounts.$inferSelect));
+    isOffBudget: parsed.data.isOffBudget as 0 | 1 | undefined,
+  });
+  res.status(201).json(withBalance(account));
 });
 
 accountsRouter.put('/reorder', (req, res) => {
@@ -133,8 +136,16 @@ accountsRouter.put('/:id', (req, res) => {
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  if (Object.keys(parsed.data).length) {
-    db.update(accounts).set(parsed.data).where(eq(accounts.id, req.params.id)).run();
+  const data = { ...parsed.data };
+  const existing = db.select().from(accounts).where(eq(accounts.id, req.params.id)).get();
+  if (!existing) return res.status(404).json({ error: 'Not found' });
+  const currency = data.currency !== undefined ? data.currency : existing.currency;
+  if (currency) {
+    if (data.isOffBudget === 0) return res.status(400).json({ error: FOREIGN_ON_BUDGET });
+    if (existing.isOffBudget === 0) data.isOffBudget = 1;
+  }
+  if (Object.keys(data).length) {
+    db.update(accounts).set(data).where(eq(accounts.id, req.params.id)).run();
   }
   const updated = db.select().from(accounts).where(eq(accounts.id, req.params.id)).get();
   if (!updated) return res.status(404).json({ error: 'Not found' });

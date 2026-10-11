@@ -1,7 +1,13 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { db } from '../db/index.js';
-import { plaidConfig, plaidItems, simplefinConnections } from '../db/schema.js';
+import {
+  enableBankingConfig,
+  enableBankingConnections,
+  plaidConfig,
+  plaidItems,
+  simplefinConnections,
+} from '../db/schema.js';
 import { encryptStoredCredentials } from './credentialEncryption.js';
 
 // vitest.config.ts runs server tests against an in-memory DB with a test key
@@ -27,14 +33,26 @@ describe('encryptStoredCredentials', () => {
         `insert into simplefin_connections (id, access_url, connection_name) values ('sf', 'https://user:pass@bridge.simplefin.org/simplefin', 'SF')`,
       )
       .run();
+    db.$client
+      .prepare(
+        `insert into enable_banking_config (id, application_id, private_key, redirect_url, environment) values ('default', 'app', '-----BEGIN PRIVATE KEY-----x', 'https://x', 'PRODUCTION')`,
+      )
+      .run();
+    db.$client
+      .prepare(
+        `insert into enable_banking_connections (id, session_id, aspsp_name, aspsp_country, valid_until) values ('eb', 'session-123', 'BBVA', 'ES', '2099-01-01')`,
+      )
+      .run();
   });
 
   it('encrypts plaintext credentials already in the database', () => {
-    expect(encryptStoredCredentials()).toBe(3);
+    expect(encryptStoredCredentials()).toBe(5);
     for (const [table, column] of [
       ['plaid_config', 'secret'],
       ['plaid_items', 'access_token'],
       ['simplefin_connections', 'access_url'],
+      ['enable_banking_config', 'private_key'],
+      ['enable_banking_connections', 'session_id'],
     ]) {
       const [{ v }] = raw(table, column);
       expect(v.startsWith('enc:v1:'), `${table}.${column}`).toBe(true);
@@ -50,6 +68,10 @@ describe('encryptStoredCredentials', () => {
     expect(db.select().from(simplefinConnections).get()?.accessUrl).toBe(
       'https://user:pass@bridge.simplefin.org/simplefin',
     );
+    expect(db.select().from(enableBankingConfig).get()?.privateKey).toBe(
+      '-----BEGIN PRIVATE KEY-----x',
+    );
+    expect(db.select().from(enableBankingConnections).get()?.sessionId).toBe('session-123');
   });
 
   it('is idempotent, and new credentials are encrypted on write', () => {

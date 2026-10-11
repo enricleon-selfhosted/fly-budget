@@ -62,6 +62,8 @@ it to pick another. The category picker can also create a new category on the sp
 
 - **Create rule** (in the panel) starts a [rule](./rules) from this transaction, with its payee
   and category filled in.
+- **Unlink transfer** (on a transfer) turns both sides back into ordinary transactions. See
+  [Transfers](#transfers).
 - **Delete Transaction** removes it, after asking. Deleting a transfer leaves the other side as
   a normal transaction; deleting a split removes its parts; deleting a payment for a recurring
   item marks that payment as unpaid again.
@@ -96,10 +98,19 @@ money out of one account and into the other.
 Transfers are linked: change the date or amount on one side and the other follows. They have no
 category, and they're left out of income and spending.
 
+Transactions imported with [Enable Banking](./bank-sync#enable-banking) become transfers too, when
+FlyBudget can tell that money moved between two of your accounts. The rules are in
+[How syncing works with Enable Banking](./bank-sync#how-syncing-works-with-enable-banking). FlyBudget
+never links transactions in different currencies.
+
+To undo a link, open the transaction and choose **Unlink transfer**. Both sides become ordinary
+transactions again, with their amounts and dates kept and no category. For a transfer that came from
+your bank, the payee goes back to the bank's name for it. Reconciled transfers can't be unlinked.
+
 ## Importing and syncing
 
 - [Import a CSV file](./importing) from your bank.
-- [Connect a bank](./bank-sync) with SimpleFIN or Plaid to bring transactions in
+- [Connect a bank](./bank-sync) with SimpleFIN, Plaid or Enable Banking to bring transactions in
   automatically.
 
 ## When the connection drops

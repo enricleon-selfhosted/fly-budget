@@ -10,9 +10,13 @@ import { AddAccountModal } from '../components/accounts/AddAccountModal';
 import { ConnectBankModal } from '../components/plaid/ConnectBankModal';
 import { PlaidSetupModal } from '../components/plaid/PlaidSetupModal';
 import { SimplefinConnectModal } from '../components/simplefin/SimplefinConnectModal';
+import { EnableBankingPanel } from '../components/enablebanking/EnableBankingPanel';
+import { NotInDemoModal } from '../components/demo/NotInDemo';
+import { Modal } from '../components/ui/Modal';
+import { IS_DEMO } from '../demo/isDemo';
 import { HelpFooter } from '../components/layout/HelpFooter';
 import { ExternalLink } from '../components/ui/ExternalLink';
-import { PlaidLogo, SimplefinLogo } from '../components/ui/BankLogos';
+import { EnableBankingLogo, PlaidLogo, SimplefinLogo } from '../components/ui/BankLogos';
 import { BrandName } from '../components/ui/BrandName';
 import { docsUrl } from '../utils/project';
 
@@ -70,6 +74,7 @@ export default function WelcomePage() {
   const [showPlaid, setShowPlaid] = useState(false);
   const [showPlaidSetup, setShowPlaidSetup] = useState(false);
   const [showSimplefin, setShowSimplefin] = useState(false);
+  const [showEnableBanking, setShowEnableBanking] = useState(false);
   const [showManual, setShowManual] = useState(false);
 
   if (isLoading) {
@@ -80,7 +85,9 @@ export default function WelcomePage() {
     );
   }
 
-  if (accounts.length > 0) {
+  // Not while the Enable Banking dialog is open: mapping creates accounts before the sync
+  // finishes, and the dialog shows how it went
+  if (accounts.length > 0 && !showEnableBanking) {
     return <Navigate to="/dashboard" replace />;
   }
 
@@ -98,7 +105,7 @@ export default function WelcomePage() {
             the accounts you want to track.
           </p>
 
-          <div className="grid gap-4 mt-8 grid-cols-1 sm:grid-cols-3">
+          <div className="grid gap-4 mt-8 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
             <SetupOption
               icon={<PlaidLogo size={24} className="text-text" />}
               title="Connect with Plaid"
@@ -116,6 +123,15 @@ export default function WelcomePage() {
               description="Set it up once and new transactions arrive on their own, through SimpleFIN Bridge (thousands of banks). Paid directly to SimpleFIN."
               action="Connect SimpleFIN"
               onClick={() => setShowSimplefin(true)}
+            />
+            <SetupOption
+              icon={<EnableBankingLogo size={24} className="text-text" />}
+              title="European bank (Enable Banking)"
+              tag="Free for personal use"
+              time="~15 min"
+              description="For banks in Europe (PSD2). Register a free Enable Banking application, then approve access at your bank. Only the accounts you link in Enable Banking can be read."
+              action="Connect a European bank"
+              onClick={() => setShowEnableBanking(true)}
             />
             <SetupOption
               icon={<PencilLine size={20} className="text-text-secondary" />}
@@ -162,6 +178,19 @@ export default function WelcomePage() {
         onConfigured={() => setShowPlaid(true)}
       />
       <SimplefinConnectModal isOpen={showSimplefin} onClose={() => setShowSimplefin(false)} />
+      {/* Its setup (the application's keys), then connecting a bank, as in Settings */}
+      {IS_DEMO ? (
+        <NotInDemoModal isOpen={showEnableBanking} onClose={() => setShowEnableBanking(false)} />
+      ) : (
+        <Modal
+          isOpen={showEnableBanking}
+          onClose={() => setShowEnableBanking(false)}
+          title="European bank (Enable Banking)"
+          size="lg"
+        >
+          <EnableBankingPanel />
+        </Modal>
+      )}
       <AddAccountModal isOpen={showManual} onClose={() => setShowManual(false)} />
     </div>
   );

@@ -1,12 +1,10 @@
 import { z } from 'zod';
 import { assertSafeUrl, readTextLimited, safeFetch, UnsafeUrlError } from './safeFetch.js';
+import { AmountError, decimalString, decimalToCents } from '../utils/money.js';
 
 // SimpleFIN protocol: https://www.simplefin.org/protocol.html
 // Everything that comes from outside (the setup token the user pastes, the access
 // URL the bridge returns, and account data) is validated before it's used or stored.
-
-/** Decimal amount as SimpleFIN sends it, e.g. "-12.34" */
-const decimalString = z.string().regex(/^-?\d{1,15}(\.\d{1,8})?$/, 'Invalid amount');
 
 const transactionSchema = z.object({
   id: z.string().min(1).max(256),
@@ -150,23 +148,22 @@ export function parseSimplefinResponse(body: string): SimplefinResponse {
   return parsed.data;
 }
 
-/** Exact conversion of a validated decimal string to integer cents (no float rounding surprises). */
-function decimalToCents(value: string): number {
-  const negative = value.startsWith('-');
-  const [whole, frac = ''] = value.replace('-', '').split('.');
-  const cents = Number(whole) * 100 + Number((frac + '00').slice(0, 2));
-  // Round half away from zero on the third decimal
-  const rounded = Number(frac[2] ?? '0') >= 5 ? cents + 1 : cents;
-  if (!Number.isSafeInteger(rounded)) throw new SimplefinError('Amount out of range');
-  return negative ? -rounded : rounded;
+/** Exact conversion to integer cents (see utils/money.ts) */
+function toCents(value: string): number {
+  try {
+    return decimalToCents(value);
+  } catch (err) {
+    if (err instanceof AmountError) throw new SimplefinError(err.message);
+    throw err;
+  }
 }
 
 export function simpleFinAmountToCents(amount: string): number {
-  return decimalToCents(decimalString.parse(amount));
+  return toCents(amount);
 }
 
 export function simpleFinBalanceToCents(balance: string): number {
-  return decimalToCents(decimalString.parse(balance));
+  return toCents(balance);
 }
 
 export function connectionNameFromResponse(response: SimplefinResponse): string {
