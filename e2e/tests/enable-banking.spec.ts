@@ -303,8 +303,9 @@ test.describe('connecting a bank (Enable Banking answers stubbed in the browser)
     await expect(dialog.getByText('12 new transactions imported')).toBeVisible();
     await expect(dialog.getByText('2 transactions matched to ones you entered')).toBeVisible();
     await expect(dialog.getByText('1 transfer linked between your accounts')).toBeVisible();
+    // The server uses the budget currency it stores (docs/multi-currency M2)
+    expect(mapping).not.toHaveProperty('budgetCurrency');
     expect(mapping).toMatchObject({
-      budgetCurrency: 'USD',
       accounts: [
         {
           id: 'ba-1',
